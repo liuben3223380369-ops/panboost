@@ -24,6 +24,11 @@ jobs:
       - name: Install buildozer
         run: pip install buildozer cython
 
+      - name: Install native build deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libtool libtool-bin autoconf automake pkg-config
+
       - name: Cache buildozer toolchain
         uses: actions/cache@v4
         with:
