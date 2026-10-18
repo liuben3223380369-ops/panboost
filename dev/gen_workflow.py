@@ -32,6 +32,16 @@ jobs:
             mobile/.buildozer
           key: buildozer-${{ runner.os }}-${{ hashFiles('mobile/buildozer.spec') }}
 
+      - name: Prepare Android SDK (Aidl fix)
+        run: |
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -sLo /tmp/ct.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/ct.zip -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "build-tools;34.0.0" "platforms;android-33" > /dev/null
+
       - name: Copy engine into mobile
         run: cp panboost.py mobile/panboost.py
 
