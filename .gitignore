@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pbctrl
+*.pbpart
+*.pblock
+.antifraud*
+buildozer/
+mobile/bin/
+mobile/.buildozer/
+*.apk
+.idea/
+.vscode/
