@@ -41,6 +41,8 @@ jobs:
           mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "build-tools;34.0.0" "platforms;android-33" > /dev/null
+          mkdir -p "$SDK/tools"
+          cp -a "$SDK/cmdline-tools/latest/." "$SDK/tools/"
 
       - name: Copy engine into mobile
         run: cp panboost.py mobile/panboost.py
