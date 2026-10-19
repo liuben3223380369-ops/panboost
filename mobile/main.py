@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.7.2。
+"""PanBoost Android 图形壳（Kivy）v1.8.1。
+
+v1.8.1：修复真机两大反馈——①网盘卡片点开的是"下载客户端"引导页
+（WebView 缺桌面 UA，被网盘 302）；②登录层无法返回（Android 返回
+键/手势无处理，无关闭入口）。修复：桌面 UA + 宽视口；顶部双按钮
+（✕ 返回首页 / ✓ 完成登录）；返回键拦截（登录层→网页后退/关闭，
+非首页屏→回首页，首页→系统默认退出）。
 
 v1.7.2：WebView 登录层挂载失败可诊断——失败详情（含具体步骤名）
 显示到账号页状态栏（用户实际所在屏）+ 落 crash-*.log；weblogin
@@ -49,7 +55,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.8.0"
+SHELL_VERSION = "1.8.1"
 
 
 def register_font():
@@ -69,6 +75,7 @@ register_font()  # 必须早于任何 Widget 创建
 
 from kivy.app import App  # noqa: E402
 from kivy.clock import Clock  # noqa: E402
+from kivy.core.window import Window  # noqa: E402
 from kivy.lang import Builder  # noqa: E402
 from kivy.metrics import dp, sp  # noqa: E402
 from kivy.properties import ListProperty  # noqa: E402
@@ -669,6 +676,10 @@ class PanBoostApp(App):
         self._btn_text = "开始下载"
         self.dir_short = external_files_dir()
         self.root = Builder.load_string(KV)
+        # Android 返回键/手势（Kivy keycode 27）必须显式处理：
+        # WebView 登录层打开时系统默认行为既不关层也不回退网页，
+        # 用户会被困在登录层（v1.8.0 真机反馈）
+        Window.bind(on_keyboard=self._on_key)
         Clock.schedule_interval(self._tick, 0.5)
         self._build_pan_grid()
         self._load_settings()
@@ -696,6 +707,25 @@ class PanBoostApp(App):
             self.refresh_accounts()
         elif name == "history":
             self.refresh_history()
+
+    def _on_key(self, window, key, *args):
+        """Android 返回键/手势（Kivy 收到 keycode 27）：
+
+        登录层打开 → 网页后退/关闭登录层返回 App；
+        非首页屏 → 切回首页；首页 → 返回 False 走系统默认（退出）。
+        """
+        if key != 27:
+            return False
+        try:
+            if weblogin.is_open():
+                weblogin.request_back()
+                return True
+            if self.root is not None and self.root.current != "home":
+                self.go("home")
+                return True
+        except Exception:
+            _dump_crash("on_back_key: ")
+        return False
 
     def _scr(self, name):
         return self.root.get_screen(name)
@@ -750,13 +780,20 @@ class PanBoostApp(App):
         if weblogin.available():
             def on_done(cookie, auto):
                 self._after_login(pan_key, cookie, auto)
+
+            def on_cancel():
+                self._home_status(
+                    f"已返回（{pan['name']} 登录未保存）——随时可再点卡片登录")
+
             try:
                 weblogin.open_login(pan["login"], pan["auth_keys"],
-                                    on_done, title=pan["name"])
+                                    on_done, title=pan["name"],
+                                    on_cancel=on_cancel)
                 self._home_status(
-                    f"已打开 {pan['name']} 登录页——完成登录后自动返回"
-                    + ("（检测到登录将自动保存）" if pan["auth_keys"]
-                       else "（登录后请点顶部按钮返回）"))
+                    f"已打开 {pan['name']} 登录页（桌面版）——"
+                    "返回键或顶部 ✕ 可回到本页"
+                    + ("，检测到登录将自动保存" if pan["auth_keys"]
+                       else "，完成后点 ✓ 完成登录"))
                 return
             except Exception as e:
                 err_txt = f"{type(e).__name__}: {e}"

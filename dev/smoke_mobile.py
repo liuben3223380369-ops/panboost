@@ -140,8 +140,24 @@ class _LabelBase:
 
 text_mod = types.ModuleType("kivy.core.text")
 text_mod.LabelBase = _LabelBase
+window_mod = types.ModuleType("kivy.core.window")
+
+
+class _Window:
+    _bound = {}
+
+    def bind(self, *largs, **kwargs):
+        self._bound.update(kwargs)
+
+    def unbind(self, *largs, **kwargs):
+        for k in kwargs:
+            self._bound.pop(k, None)
+
+
+window_mod.Window = _Window()
 core_mod = types.ModuleType("kivy.core")
 core_mod.text = text_mod
+core_mod.window = window_mod
 kivy.app = app_mod
 kivy.clock = clock_mod
 kivy.lang = lang_mod
@@ -155,6 +171,7 @@ sys.modules.update({
     "kivy.properties": props_mod, "kivy.uix": uix_mod,
     "kivy.uix.button": btn_mod, "kivy.uix.label": lbl_mod,
     "kivy.core": core_mod, "kivy.core.text": text_mod,
+    "kivy.core.window": window_mod,
     "kivy.uix.screenmanager": sm_mod, "kivy.uix.spinner": spin_mod,
 })
 
@@ -245,6 +262,35 @@ def main():
     app = mobile_main.PanBoostApp()
     app.build()
 
+    # ---- v1.8.1 登录层桌面 UA + 返回键 ----
+    import weblogin as _wl
+    wsrc = Path(_wl.__file__).read_text(encoding="utf-8")
+    check("壳-登录层桌面UA防跳下载App页",
+          "Windows NT" in _wl.DESKTOP_UA
+          and "setUserAgentString(DESKTOP_UA)" in wsrc
+          and "setUseWideViewPort" in wsrc,
+          _wl.DESKTOP_UA[:56] + "…")
+    check("壳-登录层✕返回与✓完成双按钮",
+          "✕ 返回首页" in wsrc and "✓ 完成登录" in wsrc
+          and hasattr(_wl, "close_login")
+          and hasattr(_wl, "request_back")
+          and "canGoBack" in wsrc)
+    check("壳-返回键keycode27已接入",
+          hasattr(mobile_main.PanBoostApp, "_on_key")
+          and "on_keyboard" in py_src and "key != 27" in py_src
+          and "weblogin.request_back()" in py_src)
+    check("壳-无登录层时返回接口安全",
+          _wl.request_back() is False, "request_back 返回 False")
+    _wl.close_login()  # 幂等：无登录层不抛错不回调
+    check("壳-close_login幂等无异常", True)
+    app.go("accounts")
+    check("壳-非首页按返回键回首页",
+          app._on_key(None, 27) is True and app.root.current == "home")
+    check("壳-首页按返回键走系统默认退出",
+          app._on_key(None, 27) is False)
+    check("壳-非返回键不拦截",
+          app._on_key(None, 13) is False)
+
     # ---- 首页宫格 ----
     grid = app._scr("home").ids.pan_grid
     check("壳-宫格卡片数等于网盘数", len(grid.children) == len(pans),
@@ -263,7 +309,8 @@ def main():
     mobile_main.weblogin.available = lambda: True
     orig_open = mobile_main.weblogin.open_login
     mobile_main.weblogin.open_login = (
-        lambda url, keys, on_done, title="": on_done("BDUSS=fake123", True))
+        lambda url, keys, on_done, title="", on_cancel=None:
+        on_done("BDUSS=fake123", True))
     app.pan_login("baidu")
     mobile_main.weblogin.open_login = orig_open
     acc = mobile_main.load_accounts()
@@ -291,7 +338,7 @@ def main():
     # v1.7.2 起：失败详情（含步骤名）显示到账号页状态栏 + 落 crash log
     mobile_main.weblogin.available = lambda: True
 
-    def _boom(url, keys, on_done, title=""):
+    def _boom(url, keys, on_done, title="", on_cancel=None):
         raise mobile_main.weblogin.WebLoginError(
             "登录层挂载失败: WebLoginError: 步骤[挂载到窗口]失败: "
             "RuntimeException: addContentView")

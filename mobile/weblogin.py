@@ -7,7 +7,9 @@
 
 设计要点：
 - 所有 Android UI 操作经 runOnUiThread 执行（Kivy 主线程非 UI 线程）
-- 顶部原生"完成登录"按钮兜底：特征 Cookie 未命中时用户手动返回
+- 桌面 UA 加载（v1.8.1）：移动 UA 会被网盘 302 到"下载客户端"页
+- 顶部双按钮：✕ 返回首页（放弃登录）/ ✓ 完成登录（提取 Cookie）；
+  返回键/手势走 request_back()（网页后退→关闭登录层）
 - 后台线程轮询 CookieManager，特征键命中自动关闭并回调
 - 任何一步失败抛 WebLoginError，调用方回退到手动粘贴 Cookie 路径
 - 非 Android 环境下 available() 为 False，纯 Python 逻辑可 mock 测试
@@ -28,6 +30,11 @@ except Exception:  # 非 Android / 无 pyjnius：占位保证类定义可加载
         def deco(fn):
             return fn
         return deco
+
+
+DESKTOP_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 
 class WebLoginError(Exception):
@@ -74,7 +81,8 @@ class _ClickListener(PythonJavaClass):
 
 
 _STATE = {"root": None, "webview": None, "poller": None,
-          "on_close": None, "closed": threading.Event()}
+          "on_close": None, "on_cancel": None, "done": False,
+          "closed": threading.Event()}
 
 
 def _run_ui(fn):
@@ -90,7 +98,7 @@ def _jcolor(argb):
     return argb - 0x100000000 if argb >= 0x80000000 else argb
 
 
-def _ui_open(url, title, on_manual_done):
+def _ui_open(url, title, on_manual_done, on_cancel):
     """在 UI 线程挂载覆盖层：[完成登录按钮 + WebView] 全屏。
 
     分步执行并标记失败步骤（真机诊断）：关键步骤失败抛
@@ -121,15 +129,36 @@ def _ui_open(url, title, on_manual_done):
     _step("容器纵向排列",
           lambda: root.setOrientation(LinearLayout.VERTICAL), critical=False)
 
-    btn = _step("构造返回按钮", lambda: Button(activity))
-    _step("按钮文字", lambda: btn.setText("完成登录后点这里返回 ▸"),
+    bar = _step("构造按钮栏容器", lambda: LinearLayout(activity))
+    _step("按钮栏横向排列",
+          lambda: bar.setOrientation(LinearLayout.HORIZONTAL), critical=False)
+    LLParams = _step("加载LinearLayout$LayoutParams类",
+                     lambda: autoclass(
+                         "android.widget.LinearLayout$LayoutParams"))
+
+    btn_back = _step("构造返回首页按钮", lambda: Button(activity))
+    _step("返回按钮文字", lambda: btn_back.setText("✕ 返回首页"),
           critical=False)
-    _step("按钮配色",
-          lambda: (btn.setBackgroundColor(_jcolor(0xFF2563EB)),
-                   btn.setTextColor(_jcolor(0xFFFFFFFF))), critical=False)
-    _step("按钮绑定点击", lambda: btn.setOnClickListener(
+    _step("返回按钮配色",
+          lambda: (btn_back.setBackgroundColor(_jcolor(0xFF475569)),
+                   btn_back.setTextColor(_jcolor(0xFFFFFFFF))), critical=False)
+    _step("返回按钮绑定点击", lambda: btn_back.setOnClickListener(
+        _ClickListener(on_cancel)))
+    _step("返回按钮入栏", lambda: bar.addView(
+        btn_back, LLParams(0, 160, 1.0)))
+
+    btn_done = _step("构造完成登录按钮", lambda: Button(activity))
+    _step("完成按钮文字", lambda: btn_done.setText("✓ 完成登录"),
+          critical=False)
+    _step("完成按钮配色",
+          lambda: (btn_done.setBackgroundColor(_jcolor(0xFF2563EB)),
+                   btn_done.setTextColor(_jcolor(0xFFFFFFFF))), critical=False)
+    _step("完成按钮绑定点击", lambda: btn_done.setOnClickListener(
         _ClickListener(on_manual_done)))
-    _step("按钮入容器", lambda: root.addView(btn, LayoutParams(-1, 160)))
+    _step("完成按钮入栏", lambda: bar.addView(
+        btn_done, LLParams(0, 160, 1.0)))
+
+    _step("按钮栏入容器", lambda: root.addView(bar, LayoutParams(-1, 160)))
 
     wv = _step("构造WebView", lambda: WebView(activity))
 
@@ -138,6 +167,12 @@ def _ui_open(url, title, on_manual_done):
         settings.setJavaScriptEnabled(True)
         settings.setDomStorageEnabled(True)
         settings.setSupportZoomControls(True)
+        # 桌面 UA + 宽视口：Android WebView 默认移动 UA 会被多数网盘
+        # 302 到"下载客户端"引导页（v1.8.0 真机"点卡片打开的是下载
+        # App 页"根因）；桌面 UA 让服务端返回 PC 版登录页
+        settings.setUserAgentString(DESKTOP_UA)
+        settings.setUseWideViewPort(True)
+        settings.setLoadWithOverviewMode(True)
     _step("WebView基础配置", _cfg, critical=False)
 
     def _cookie():
@@ -204,12 +239,14 @@ def current_cookies(url):
     return box.get("cookie")
 
 
-def open_login(url, auth_keys=(), on_done=None, title="登录"):
+def open_login(url, auth_keys=(), on_done=None, title="登录",
+               on_cancel=None):
     """打开 WebView 登录层。
 
-    url: 登录页地址
+    url: 登录页地址（桌面 UA 加载，避免移动端跳"下载App"引导页）
     auth_keys: 登录成功特征 Cookie 键（如百度 BDUSS）；命中即自动完成
     on_done(cookie_str, auto: bool): 完成回调（手动按钮或特征命中）
+    on_cancel(): 放弃登录回调（✕ 返回首页按钮或返回键触发）
     返回 True 表示已打开；失败抛 WebLoginError（调用方回退手动路径）。
     """
     if not _JNIUS_OK:
@@ -217,12 +254,16 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
     if _STATE["root"] is not None:
         raise WebLoginError("已有登录窗口打开中")
 
+    _STATE["on_cancel"] = on_cancel
+    _STATE["done"] = False
     done_once = threading.Event()
 
     def _finish(auto):
         if done_once.is_set():
             return
         done_once.set()
+        _STATE["done"] = True
+        _STATE["on_cancel"] = None
         cookie = None
         try:
             cookie = current_cookies(url)
@@ -246,6 +287,10 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
             except Exception:
                 pass
 
+    def _cancel():
+        # ✕ 返回首页按钮：放弃登录（不提取 Cookie，不触发 on_done）
+        close_login()
+
     # UI 层挂载结果必须确认回传：runOnUiThread 是异步 post，异常不会
     # 传播回调用方——v1.7.0 的 fire-and-forget 让挂载失败完全静默，
     # 表象即"点击卡片无反应"。
@@ -257,7 +302,8 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
         try:
             if aborted:
                 return  # 等待期已判超时失败，不再挂载（防幽灵层）
-            _ui_open(url, title, lambda: _finish(False))
+            _ui_open(url, title, lambda: _finish(False),
+                     lambda: _cancel())
             if aborted:
                 # 极小窗口：挂载完成才发现已被判超时 → 立即撤下
                 try:
@@ -312,3 +358,76 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
 
 def is_open():
     return _STATE["root"] is not None
+
+
+def close_login():
+    """放弃登录、直接关闭登录层（✕ 按钮或返回键触发）。
+
+    不提取 Cookie、不触发 on_done；若 open_login 传入了 on_cancel
+    则回调之（调用方用于更新界面状态）。
+    """
+    if _STATE["root"] is None and _STATE["poller"] is None:
+        return
+    poller = _STATE["poller"]
+    if poller is not None:
+        poller["stop"] = True
+        _STATE["poller"] = None
+    try:
+        _run_ui(_ui_close)
+    except Exception:
+        # post 失败：只重置状态，绝不在非 UI 线程操作视图
+        _STATE["root"] = None
+        _STATE["webview"] = None
+        _STATE["closed"].set()
+    cb = _STATE.get("on_cancel")
+    _STATE["on_cancel"] = None
+    if cb is not None and not _STATE.get("done"):
+        try:
+            cb()
+        except Exception:
+            pass
+
+
+def request_back():
+    """Android 返回键/手势语义（登录层打开时）：
+
+    网页有后退历史（如登录页→验证页）则 webView.goBack()；
+    无历史则关闭登录层返回 App（等价 ✕ 返回首页）。
+
+    返回 True 表示登录层在前台且已处理；False 表示当前无登录层，
+    调用方应继续自己的返回逻辑（如切回首页屏）。
+    """
+    if _STATE["root"] is None:
+        return False
+    probe = {}
+
+    def _probe():
+        wv = _STATE["webview"]
+        try:
+            probe["goback"] = bool(wv is not None and wv.canGoBack())
+        except Exception:
+            probe["goback"] = False
+
+    try:
+        _run_ui(_probe)
+        for _ in range(30):  # 等 UI 线程回写，最多 1.5s
+            if "goback" in probe:
+                break
+            time.sleep(0.05)
+    except Exception:
+        pass
+    if probe.get("goback"):
+        def _back():
+            try:
+                wv = _STATE["webview"]
+                if wv is not None:
+                    wv.goBack()
+            except Exception:
+                pass
+        try:
+            _run_ui(_back)
+        except Exception:
+            pass
+        return True
+    close_login()
+    return True

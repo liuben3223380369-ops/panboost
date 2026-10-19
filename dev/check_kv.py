@@ -97,6 +97,21 @@ def main():
     assert "find_resolver" in msrc, "下载流程未检测分享链接"
     assert "分享链接" in m.KV, "下载屏未提示支持分享链接"
 
+    # v1.8.1 真机修复：桌面 UA（防 302 到下载App引导页）+ 返回能力
+    assert "setUserAgentString(DESKTOP_UA)" in wsrc, \
+        "WebView 未设桌面 UA（移动 UA 被网盘跳下载客户端页）"
+    assert "Windows NT" in weblogin.DESKTOP_UA, "桌面 UA 常量异常"
+    assert "setUseWideViewPort" in wsrc, "缺宽视口（PC 页无法自适应屏宽）"
+    assert hasattr(weblogin, "request_back"), "缺 request_back（返回键）"
+    assert hasattr(weblogin, "close_login"), "缺 close_login（✕ 返回）"
+    assert "canGoBack" in wsrc, "返回键缺网页后退语义"
+    assert "返回首页" in wsrc, "缺 ✕ 返回首页按钮"
+    assert hasattr(m.PanBoostApp, "_on_key"), "缺返回键处理方法 _on_key"
+    assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
+    assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
+    assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
+    assert m.SHELL_VERSION == "1.8.1", "壳版本未升级到 1.8.1"
+
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG
     assert r > 0.9 and g > 0.9 and b > 0.9, f"非浅色底: {m.BG}"
