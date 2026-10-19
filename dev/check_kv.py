@@ -92,6 +92,10 @@ def main():
     assert '_dump_crash("weblogin 打开失败' in msrc, \
         "WebView 失败未落 crash log"
     assert "err_txt[:110]" in msrc, "WebView 失败详情未显示到账号页"
+    # v1.8.0 分享链接解析集成
+    assert hasattr(m.PanBoostApp, "_run_share"), "缺 _run_share 分享分发"
+    assert "find_resolver" in msrc, "下载流程未检测分享链接"
+    assert "分享链接" in m.KV, "下载屏未提示支持分享链接"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

@@ -49,7 +49,7 @@ from pathlib import Path
 # §1 常量与全局配置
 # =====================================================================
 
-VERSION = "1.6.0"
+VERSION = "1.8.0"
 APP = "panboost"
 CONFIG_DIR = Path(os.environ.get("PANBOOST_HOME") or Path.home() / ".panboost")
 COOKIE_DB = CONFIG_DIR / "cookies.json"
@@ -2019,7 +2019,7 @@ def resolve_lanzou(url, headers=None):
                  "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                  "X-Requested-With": "XMLHttpRequest",
                  "Referer": iframe_url},
-        body=urllib.parse.urlencode({"action": "downprocess", "sign": sign,
+        body=urllib.parse.urllib.parse.urlencode({"action": "downprocess", "sign": sign,
                                      "kd": "1", "ves": "1"}))
     if status != 200:
         raise DownloadError(f"接口请求失败({status})")
@@ -2040,12 +2040,182 @@ def resolve_lanzou(url, headers=None):
     return f"{dom.rstrip('/')}/file/{path_.lstrip('/')}"
 
 
+def _resolver_base(name, default):
+    """解析器 API 基址（可被 PANBOOST_RESOLVER_HOSTS 环境变量覆盖，
+    JSON 格式 {"quark": "http://127.0.0.1:PORT"}，测试注入用）。"""
+    try:
+        overrides = json.loads(os.environ.get("PANBOOST_RESOLVER_HOSTS", "{}"))
+        return str(overrides.get(name, default)).rstrip("/")
+    except Exception:
+        return default
+
+
+def _share_key(url, pattern):
+    """从分享链接提取共享 key 与提取码（?code=xxx / #code / &pwd=）。"""
+    m = re.search(pattern, url)
+    if not m:
+        raise DownloadError("无法从链接提取分享码")
+    key = m.group(1)
+    code = ""
+    mc = (re.search(r"[?&](?:code|pwd)=([A-Za-z0-9]+)", url)
+          or re.search(r"#([A-Za-z0-9]{4,8})$", url))
+    if mc:
+        code = mc.group(1)
+    return key, code
+
+
+def _get_json(url, headers, referer=None, insecure=False, timeout=30):
+    h = {"User-Agent": DEFAULT_UA, "Accept": "application/json",
+         "Accept-Language": "zh-CN,zh;q=0.9"}
+    if referer:
+        h["Referer"] = referer
+    if headers:
+        h.update({k: v for k, v in headers.items()
+                  if k in ("Cookie", "User-Agent", "Referer")})
+    status, _, body = http_request(url, headers=h, insecure=insecure,
+                                   timeout=timeout)
+    if status != 200:
+        raise DownloadError(f"接口请求失败({status})")
+    try:
+        return json.loads(body.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        raise DownloadError("接口返回非JSON")
+
+
+def _get_json_post(url, payload, headers, referer=None, insecure=False,
+                   timeout=30):
+    h = {"User-Agent": DEFAULT_UA, "Accept": "application/json",
+         "Accept-Language": "zh-CN,zh;q=0.9",
+         "Content-Type": "application/json"}
+    if referer:
+        h["Referer"] = referer
+    if headers:
+        h.update({k: v for k, v in headers.items()
+                  if k in ("Cookie", "User-Agent", "Referer")})
+    status, _, body = http_request(
+        url, method="POST", headers=h,
+        body=json.dumps(payload).encode("utf-8"),
+        insecure=insecure, timeout=timeout)
+    if status != 200:
+        raise DownloadError(f"接口请求失败({status})")
+    try:
+        return json.loads(body.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        raise DownloadError("接口返回非JSON")
+
+
+def resolve_pan123(url, headers=None):
+    """123云盘分享链接 → 直链（公开分享免登录）。
+
+    返回 str（单文件）或 list[dict]（多文件，name/size/url/headers）。
+    流程参考社区公开 Web 端接口：share/info 拿会话 → share/get 拿
+    列表与直链。带提取码时用 ?code= 附加在分享链接后。
+    """
+    key, code = _share_key(url, r"123pan\.com/s/([A-Za-z0-9]+)")
+    base = _resolver_base("pan123", "https://www.123pan.com")
+    referer = f"https://www.123pan.com/s/{key}"
+    q = urllib.parse.urlencode({"shareKey": key, "pwd": code})
+    info = _get_json(f"{base}/api/share/info?{q}", headers,
+                     referer=referer)
+    data = info.get("data") or {}
+    if info.get("code") != 0 or not data.get("ShareKey"):
+        raise DownloadError(f"分享信息获取失败: {info.get('message', info)}")
+    sk = data["ShareKey"]
+    skid = data.get("ShareKeyID", data.get("ShareKeyId"))
+    q = urllib.parse.urlencode({"ShareKey": sk, "ShareKeyId": str(skid),
+                   "Limit": "100", "Offset": "0"})
+    lst = _get_json(f"{base}/api/share/get?{q}", headers, referer=referer)
+    ldata = lst.get("data") or {}
+    if lst.get("code") != 0:
+        raise DownloadError(f"文件列表获取失败: {lst.get('message', lst)}")
+    items = ldata.get("InfoList") or []
+    files = [it for it in items if int(it.get("IsDir") or 0) == 0]
+    if not files:
+        raise DownloadError("分享内没有可直接下载的文件（空分享或文件夹分享）")
+    out = []
+    for it in files:
+        q = urllib.parse.urlencode({"ShareKey": sk, "ShareKeyId": str(skid),
+                       "S3KeyTag": it.get("S3KeyTag", ""),
+                       "FileId": str(it.get("FileId", ""))})
+        d = _get_json(f"{base}/api/share/get?{q}", headers, referer=referer)
+        ddata = (d.get("data") or {}).get("InfoList") or [{}]
+        dl = ddata[0].get("DownloadUrl") if ddata else None
+        if not dl:
+            raise DownloadError(
+                f"未取得直链: {it.get('FileName', '?')} ({d.get('message', d)})")
+        out.append({"name": it.get("FileName") or "123pan.bin",
+                    "size": int(it.get("Size") or 0),
+                    "url": dl, "headers": {"Referer": referer}})
+    return out
+
+
+def resolve_quark(url, headers=None):
+    """夸克网盘分享链接 → 直链（需登录 Cookie：__puus）。
+
+    流程与网页端一致：sharepage/token 拿 stoken → detail 拿文件列表
+    → download 拿 download_url（302 直链，下载需带 Cookie + Referer）。
+    Cookie 由 cookie store / --cookie 自动注入（夸克账号需先登录）。
+    """
+    key, code = _share_key(url, r"quark\.cn/s/([A-Za-z0-9]+)")
+    base = _resolver_base("quark", "https://drive-pc.quark.cn")
+    referer = "https://pan.quark.cn/"
+    tok = _get_json_post(
+        f"{base}/1/clouddrive/share/sharepage/token?pr=ucpro&fr=pc",
+        {"pwd_id": key, "passcode": code}, headers, referer=referer)
+    if tok.get("code") != 0:
+        msg = str(tok.get("message", ""))
+        if "登录" in msg or tok.get("code") in (4100805, 4101202):
+            raise DownloadError(
+                "夸克分享解析需登录 Cookie：请先在 App 首页夸克入口登录，"
+                "或 CLI 使用 --cookie/--cookie-file 提供 __puus")
+        raise DownloadError(f"分享令牌获取失败: {msg or tok}")
+    stoken = (tok.get("data") or {}).get("stoken")
+    if not stoken:
+        raise DownloadError("接口未返回 stoken")
+    q = urllib.parse.urlencode({"pr": "ucpro", "fr": "pc", "pwd_id": key,
+                   "stoken": stoken, "pdir_fid": "0",
+                   "_page": "1", "_size": "100"})
+    det = _get_json(f"{base}/1/clouddrive/share/sharepage/detail?{q}",
+                    headers, referer=referer)
+    if det.get("code") != 0:
+        raise DownloadError(f"文件列表获取失败: {det.get('message', det)}")
+    items = (det.get("data") or {}).get("list") or []
+    files = [it for it in items if not it.get("dir")]
+    if not files:
+        raise DownloadError("分享内没有可直接下载的文件（空分享或文件夹分享）")
+    out = []
+    for it in files:
+        q = urllib.parse.urlencode({"pr": "ucpro", "fr": "pc", "pwd_id": key,
+                       "stoken": stoken, "fid": it.get("fid", "")})
+        d = _get_json(
+            f"{base}/1/clouddrive/share/sharepage/download?{q}",
+            headers, referer=referer)
+        if d.get("code") != 0:
+            raise DownloadError(
+                f"未取得直链: {it.get('file_name', '?')} ({d.get('message', d)})")
+        dl = (d.get("data") or {}).get("download_url")
+        if not dl:
+            raise DownloadError("接口未返回 download_url")
+        fh = {"Referer": referer}
+        ck = (headers or {}).get("Cookie")
+        if ck:
+            fh["Cookie"] = ck
+        out.append({"name": it.get("file_name") or "quark.bin",
+                    "size": int(it.get("size") or 0),
+                    "url": dl, "headers": fh})
+    return out
+
+
 RESOLVERS = {
     "lanzou": resolve_lanzou,
+    "pan123": resolve_pan123,
+    "quark": resolve_quark,
 }
 
 RESOLVE_HINTS = [
     ("lanzou", re.compile(r"lanzou[a-z]*\.(?:com|cn)|lanzn\.com", re.I)),
+    ("pan123", re.compile(r"123pan\.com/s/[A-Za-z0-9]+", re.I)),
+    ("quark", re.compile(r"quark\.cn/s/[A-Za-z0-9]+", re.I)),
 ]
 
 
@@ -2078,6 +2248,9 @@ def build_headers(args, url):
         cookie = match_cookie_header(url)
     if cookie:
         headers["Cookie"] = cookie
+    sf = (getattr(args, "_share_files", None) or {}).get(url)
+    if sf and sf.get("headers"):
+        headers.update({k: v for k, v in sf["headers"].items() if v})
     return headers
 
 
@@ -2085,8 +2258,10 @@ def decide_output(args, probe):
     bdir = getattr(args, "_batch_dir", None)
     if bdir is not None:
         # 批量模式：-o 作为输出目录，文件名取服务器/URL 名，重名自动编号
-        name = (probe.filename or filename_from_url(args.url)
-                or "download.bin")
+        sf = (getattr(args, "_share_files", None) or {}).get(args.url)
+        name = (sf and sf.get("name")) or \
+            (probe.filename or filename_from_url(args.url)
+             or "download.bin")
         out = Path(bdir) / name
         stem, ext = out.stem, out.suffix
         n = 1
@@ -2129,12 +2304,17 @@ def _run_once(args):
     url = args.url
     headers = build_headers(args, url)
     persona = PersonaKit(enabled=not getattr(args, "no_persona", False))
-    resolver = find_resolver(url)
+    resolver = None if getattr(args, "_share_files", None) \
+        else find_resolver(url)
     if resolver and not args.no_resolve:
         try:
             direct = RESOLVERS[resolver](url, headers)
+            if isinstance(direct, list):
+                direct = direct[0] if direct else None
+            if isinstance(direct, dict):
+                direct = direct.get("url")
             if direct:
-                print(f"[解析] {resolver} -> {direct}")
+                print(f"[解析] {resolver} -> 直链")
                 url = direct
                 headers = build_headers(args, url)
         except DownloadError as e:
@@ -2245,12 +2425,16 @@ def _run_batch(args):
     全部成功返回 0，部分失败返回 2；Ctrl+C 中断队列并汇总已完成的。
     """
     try:
-        lines = Path(args.input).read_text(encoding="utf-8").splitlines()
+        if getattr(args, "_url_list", None):
+            urls = list(args._url_list)
+        else:
+            lines = Path(args.input).read_text(
+                encoding="utf-8").splitlines()
+            urls = [l.strip() for l in lines
+                    if l.strip() and not l.strip().startswith("#")]
     except OSError as e:
         print(f"[批量] 无法读取列表文件: {e}")
         return 1
-    urls = [l.strip() for l in lines
-            if l.strip() and not l.strip().startswith("#")]
     if not urls:
         print("[批量] 列表为空（每行一个 URL，#开头为注释）")
         return 1
@@ -2305,13 +2489,64 @@ def _run_batch(args):
         (130 if interrupted and not ok_list else 2 if fail_list else 130)
 
 
+def _pre_resolve(args):
+    """分享链接前置解析（v1.8.0）。
+
+    单文件：替换 args.url 为直链（记 per-file 头）；多文件：注入
+    _url_list + _share_files 走批量队列（-o 语义自动变输出目录）。
+    """
+    resolver = find_resolver(args.url)
+    if not resolver:
+        return
+    headers = build_headers(args, args.url)
+    resolved = RESOLVERS[resolver](args.url, headers)
+    if isinstance(resolved, str) and resolved:
+        if not args.quiet:
+            print(f"[解析] {resolver} -> 直链")
+        args.url = resolved
+        args._share_files = {resolved: {"name": None, "headers": None}}
+        return
+    if isinstance(resolved, dict) and resolved.get("url"):
+        resolved = [resolved]
+    if isinstance(resolved, list) and resolved:
+        files = resolved
+        if len(files) == 1:
+            f = files[0]
+            if not args.quiet:
+                print(f"[解析] {resolver} -> {f['name']} "
+                      f"({fmt_size(f.get('size') or 0)})")
+            args._share_files = {f["url"]: f}
+            args.url = f["url"]
+            return
+        if not args.quiet:
+            print(f"[解析] {resolver} 分享含 {len(files)} 个文件，"
+                  "进入批量下载（-o 为输出目录）")
+        args._url_list = [f["url"] for f in files]
+        args._share_files = {f["url"]: f for f in files}
+        if not args.output:
+            args.output = "."
+        args._batch_dir = args.output
+        return "batch"
+
+
 def cmd_download(args):
-    if getattr(args, "input", None):
+    if getattr(args, "input", None) or getattr(args, "_url_list", None):
         try:
             return _run_batch(args)
         finally:
             if getattr(args, "explain", False):
                 AUDIT.explain()
+    if not getattr(args, "no_resolve", False):
+        try:
+            if _pre_resolve(args) == "batch":
+                try:
+                    return _run_batch(args)
+                finally:
+                    if getattr(args, "explain", False):
+                        AUDIT.explain()
+        except DownloadError as e:
+            print(f"[解析失败] {e}")
+            return 1
     want = (args.sha256 or args.md5 or "").lower() or None
     try:
         if not want:
@@ -2394,6 +2629,16 @@ def cmd_resolve(args):
         return 1
     try:
         direct = RESOLVERS[name](args.url)
+        if isinstance(direct, dict):
+            direct = [direct]
+        if isinstance(direct, list):
+            print(f"共 {len(direct)} 个文件：")
+            for f in direct:
+                print(f"  {f['name']}\t{fmt_size(f.get('size') or 0)}\t"
+                      f"{f['url']}")
+            print("提示：直接 panboost download <分享链接> 可全部下载"
+                  "（-o 指定输出目录）")
+            return 0
         if direct:
             print(direct)
             return 0

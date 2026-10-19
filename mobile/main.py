@@ -42,21 +42,14 @@ if IS_ANDROID:
 sys.path.insert(0, str(Path(__file__).parent))
 import panboost as pb  # noqa: E402
 import weblogin  # noqa: E402
+from pans import PANS, PAN_BY_KEY  # noqa: E402
+from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
+                   INK, SUB, GREEN)
 
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.7.2"
-
-# ---------------- 浅色主题色板 ----------------
-BG = (0.957, 0.965, 0.984, 1)          # 页面底 #F4F6FB
-CARD = (1.0, 1.0, 1.0, 1.0)            # 卡片白
-CARD_DOWN = (0.906, 0.925, 0.969, 1)   # 卡片按压
-PRIMARY = (0.145, 0.388, 0.922, 1)     # 主蓝 #2563EB
-PRIMARY_DARK = (0.118, 0.298, 0.761, 1)
-INK = (0.118, 0.161, 0.231, 1)         # 主文字 #1E293B
-SUB = (0.396, 0.447, 0.533, 1)         # 次文字 #64748B
-GREEN = (0.086, 0.639, 0.290, 1)       # 已登录 #16A34A
+SHELL_VERSION = "1.8.0"
 
 
 def register_font():
@@ -83,57 +76,6 @@ from kivy.uix.button import Button  # noqa: E402
 from kivy.uix.label import Label  # noqa: E402
 from kivy.uix.screenmanager import Screen  # noqa: E402
 from kivy.uix.spinner import SpinnerOption  # noqa: E402
-
-
-# ---------------- 网盘清单（首页宫格） ----------------
-# auth_keys: 登录成功特征 Cookie 键，命中自动完成；空 = 依赖用户点
-#            "完成登录"按钮返回
-# domains:   Cookie 生效域（写入引擎 cookie store，下载时后缀匹配）
-PANS = [
-    {"key": "baidu", "name": "百度网盘", "login": "https://pan.baidu.com/",
-     "domains": ["baidu.com"], "auth_keys": ["BDUSS"]},
-    {"key": "quark", "name": "夸克网盘", "login": "https://pan.quark.cn/",
-     "domains": ["quark.cn"], "auth_keys": ["__puus"]},
-    {"key": "alipan", "name": "阿里云盘", "login": "https://www.alipan.com/",
-     "domains": ["alipan.com", "aliyundrive.com"], "auth_keys": []},
-    {"key": "weiyun", "name": "腾讯微云", "login": "https://www.weiyun.com/",
-     "domains": ["weiyun.com"], "auth_keys": []},
-    {"key": "tianyi", "name": "天翼云盘", "login": "https://cloud.189.cn/",
-     "domains": ["189.cn"], "auth_keys": []},
-    {"key": "yidong", "name": "移动云盘",
-     "login": "https://caiyun.feixin.10086.cn/",
-     "domains": ["10086.cn"], "auth_keys": []},
-    {"key": "xunlei", "name": "迅雷云盘", "login": "https://pan.xunlei.com/",
-     "domains": ["xunlei.com"], "auth_keys": []},
-    {"key": "pan123", "name": "123云盘", "login": "https://www.123pan.com/",
-     "domains": ["123pan.com"], "auth_keys": []},
-    {"key": "lanzou", "name": "蓝奏云", "login": "https://www.lanzou.com/",
-     "domains": ["lanzou.com", "lanzoux.com"], "auth_keys": []},
-    {"key": "jianguo", "name": "坚果云", "login": "https://www.jianguoyun.com/",
-     "domains": ["jianguoyun.com"], "auth_keys": []},
-    {"key": "uc", "name": "UC网盘", "login": "https://drive.uc.cn/",
-     "domains": ["uc.cn"], "auth_keys": []},
-    {"key": "gdrive", "name": "Google Drive",
-     "login": "https://accounts.google.com/",
-     "domains": ["google.com", "googleusercontent.com"],
-     "auth_keys": ["SAPISID"]},
-    {"key": "dropbox", "name": "Dropbox", "login": "https://www.dropbox.com/",
-     "domains": ["dropbox.com", "dropboxusercontent.com"],
-     "auth_keys": []},
-    {"key": "onedrive", "name": "OneDrive",
-     "login": "https://login.live.com/",
-     "domains": ["live.com", "1drv.com", "sharepoint.com"],
-     "auth_keys": []},
-    {"key": "mega", "name": "MEGA", "login": "https://mega.nz/",
-     "domains": ["mega.nz"], "auth_keys": []},
-    {"key": "pcloud", "name": "pCloud", "login": "https://www.pcloud.com/",
-     "domains": ["pcloud.com"], "auth_keys": []},
-    {"key": "box", "name": "Box", "login": "https://www.box.com/",
-     "domains": ["box.com", "boxcloud.com"], "auth_keys": []},
-    {"key": "yandex", "name": "Yandex Disk", "login": "https://disk.yandex.com/",
-     "domains": ["yandex.com", "yandex.ru"], "auth_keys": []},
-]
-PAN_BY_KEY = {p["key"]: p for p in PANS}
 
 
 class MainScreen(Screen):
@@ -210,7 +152,7 @@ def _install_crash_logger():
 
         class _CrashHandler(ExceptionHandler):
             def handle_exception(self, e):
-                _dump("kivy: %s: %s\n" % (type(e).__name__, e))
+                _dump_crash("kivy: %s: %s\n" % (type(e).__name__, e))
                 return ExceptionManager.RAISE
 
         ExceptionManager.handler = _CrashHandler()
@@ -482,7 +424,7 @@ ScreenManager:
 
         TextInput:
             id: url_input
-            hint_text: '下载直链 URL（http/https）'
+            hint_text: '下载 URL：直链，或蓝奏/123/夸克分享链接'
             multiline: False
             size_hint_y: None
             height: dp(40)
@@ -949,10 +891,11 @@ class PanBoostApp(App):
             if self.dl is not None:
                 self.dl.stop_event.set()
                 self.log("已请求停止，进度将保存…")
+            self._cancel = True
             return
         url = self._scr("download").ids.url_input.text.strip()
         if not url:
-            self.log("请先输入下载直链 URL")
+            self.log("请先输入下载 URL（直链或网盘分享链接）")
             return
         manual_cookie = self._scr("download").ids.cookie_input.text.strip()
         choice = self._scr("download").ids.threads_spinner.text
@@ -966,6 +909,7 @@ class PanBoostApp(App):
             self.log("未匹配到已存账号 Cookie，匿名下载")
         self._progress = 0.0
         self._status = "探测中…"
+        self._cancel = False
         if start_keepalive():
             self.log("已开启前台保活（锁屏/后台下载不断流）")
         self.worker = threading.Thread(
@@ -989,20 +933,32 @@ class PanBoostApp(App):
                     continue
             raise
 
-    def _run_download(self, url, cookie, choice, insecure):
+    def _run_download(self, url, cookie, choice, insecure,
+                      share_name=None, share_headers=None, share_url=None):
+        # v1.8.0：分享链接先解析（蓝奏/123/夸克），多文件依次下载
+        try:
+            resolver = pb.find_resolver(url)
+        except Exception:
+            resolver = None
+        if resolver:
+            self._run_share(resolver, url, cookie, choice, insecure)
+            return
         out_name = ""
         size = 0
         speed = 0.0
         status = "失败"
         try:
             headers = {"Cookie": cookie} if cookie else {}
+            if share_headers:
+                headers.update({k: v for k, v in share_headers.items() if v})
             probe, headers = self._probe_with_ua_fallback(
                 url, headers, insecure)
             if probe.challenge_cookie:
                 headers = pb.merge_cookie_header(
                     dict(headers), *probe.challenge_cookie)
                 self.log("已自动通过浏览器验证挑战")
-            out = Path(external_files_dir()) / _safe_name(probe.filename, url)
+            out = Path(external_files_dir()) / _safe_name(
+                share_name or probe.filename, url)
             out.parent.mkdir(parents=True, exist_ok=True)
             out_name = out.name
             size = probe.size or 0
@@ -1066,15 +1022,56 @@ class PanBoostApp(App):
             self._status = "失败"
             status = "失败"
             if not out_name:
-                out_name = _safe_name(None, url)  # 探测失败也记录，便于重跑
+                out_name = _safe_name(share_name, url)  # 探测失败也记录，便于重跑
             self.log(f"{type(e).__name__}: {e}")
         finally:
             self.dl = None
             stop_keepalive()
             if out_name:
-                add_history({"ts": int(time.time()), "url": url,
+                add_history({"ts": int(time.time()),
+                             "url": share_url or url,
                              "name": out_name, "size": size,
                              "status": status, "speed": round(speed)})
+
+    def _run_share(self, resolver, url, cookie, choice, insecure):
+        """分享链接解析分发：单文件直下；多文件批量循环（可停止）。"""
+        try:
+            self.log(f"识别到分享链接（{resolver}），解析中…")
+            headers = {"Cookie": cookie} if cookie else {}
+            resolved = pb.RESOLVERS[resolver](url, headers)
+        except pb.DownloadError as e:
+            self._status = f"解析失败: {str(e)[:50]}"
+            self.log(f"分享解析失败: {e}")
+            add_history({"ts": int(time.time()), "url": url,
+                         "name": _safe_name(None, url), "size": 0,
+                         "status": "失败", "speed": 0})
+            return
+        if isinstance(resolved, str):
+            resolved = [{"url": resolved, "name": None, "headers": None}]
+        if isinstance(resolved, dict):
+            resolved = [resolved]
+        total = len(resolved)
+
+        def _one(f):
+            ck = (f.get("headers") or {}).get("Cookie") or cookie
+            self._run_download(f["url"], ck, choice, insecure,
+                               share_name=f.get("name"),
+                               share_headers=f.get("headers"),
+                               share_url=url)
+
+        if total == 1:
+            _one(resolved[0])
+            return
+        self.log(f"分享含 {total} 个文件，依次下载（可在下载页停止）")
+        done = 0
+        for i, f in enumerate(resolved, 1):
+            if getattr(self, "_cancel", False):
+                self.log(f"已停止（已完成 {done}/{total}）")
+                break
+            self.log(f"[{i}/{total}] {f.get('name') or '文件'}")
+            _one(f)
+            done = i
+        self._status = f"批量完成 {done}/{total}"
 
     # ---------- 主线程侧（UI 刷新） ----------
 

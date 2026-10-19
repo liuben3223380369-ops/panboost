@@ -31,7 +31,7 @@ def sampler():
 threading.Thread(target=sampler, daemon=True).start()
 with tempfile.TemporaryDirectory() as td:
     out = Path(td) / "e.bin"
-    r = subprocess.run([sys.executable, "/workspace/panboost/panboost.py",
+    r = subprocess.run([sys.executable, str(Path(__file__).parent.parent / "panboost.py"),
                         "download", srv.url + "/e.bin", "-o", str(out),
                         "-t", "1024", "--min-piece", "32768"],
                        capture_output=True, text=True, timeout=240)

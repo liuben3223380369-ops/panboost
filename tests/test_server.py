@@ -3,6 +3,8 @@
 """PanBoost 本地测试服务器：支持 Range / 限速 / 重定向 / Cookie 校验 / 并发统计"""
 import http.server
 import io
+import json
+import urllib.parse
 import random
 import re
 import socket
@@ -28,6 +30,10 @@ class TestHandler(http.server.BaseHTTPRequestHandler):
 
     def _route_data(self):
         """按路径取数据（双进程竞争测试：不同路径返回不同内容）"""
+        pd = getattr(self.server, "path_data", {})
+        if self.path in pd:
+            item = pd[self.path]
+            return item["data"] if isinstance(item, dict) else item
         alt = self.cfg.get("alt_path")
         if alt and self.path == alt:
             return self.cfg["alt_data"]
@@ -208,7 +214,67 @@ class TestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
 
+    def _json_route(self):
+        """命中 JSON 路由则应答并返回 True（网盘 API mock）。"""
+        routes = getattr(self.server, "json_routes", {})
+        path = self.path.split("?", 1)[0]
+        cands = routes.get((self.command, path)) or []
+        if not cands:
+            return False
+        q = urllib.parse.parse_qs(self.path.split("?", 1)[1]) \
+            if "?" in self.path else {}
+        route = None
+        for c in cands:
+            wq = c.get("when_query")
+            if not wq:
+                continue
+            k, _, v = wq.partition("=")
+            if k in q and (not v or v in q[k]):
+                route = c
+                break
+        if route is None:
+            plain = [c for c in cands if not c.get("when_query")]
+            if plain:
+                route = plain[0]
+        if route is None:
+            return False
+        self.server.header_log.append(
+            {"path": path, "Cookie": self.headers.get("Cookie"),
+             "Referer": self.headers.get("Referer"),
+             "UA": self.headers.get("User-Agent")})
+        if route.get("require_cookie"):
+            ck = self.headers.get("Cookie") or ""
+            if route["require_cookie"] not in ck:
+                body = json.dumps(
+                    {"code": 4100805, "message": "需要登录后操作"},
+                    ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return True
+        body = json.dumps(route["json"], ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
+    def do_POST(self):
+        if self._json_route():
+            return
+        n = int(self.headers.get("Content-Length") or 0)
+        if n:
+            self.rfile.read(n)
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
+        if self._json_route():
+            return
         if self.cfg.get("redirect_to"):
             self.send_response(302)
             self.send_header("Location", self.cfg["redirect_to"])
@@ -346,6 +412,8 @@ class TestServer(http.server.ThreadingHTTPServer):
         self.truncate_hits = 0
         self.rst_count = 0
         self.fail_rng = random.Random(42)
+        self.json_routes = {}
+        self.path_data = {}
         self.cfg = {"data": b"", "support_range": True}
         super().__init__(addr, TestHandler)
         threading.Thread(target=self.serve_forever, daemon=True).start()
@@ -360,6 +428,23 @@ class TestServer(http.server.ThreadingHTTPServer):
     @property
     def url(self):
         return f"http://127.0.0.1:{self.server_address[1]}"
+
+    def add_json(self, path, obj, method="GET", require_cookie=None,
+                 when_query=None):
+        """注册 JSON API 路由（网盘分享解析 mock）。
+
+        when_query: 路由命中条件——"key"（query 含该参数）或
+                    "key=value"（query 参数精确匹配），None=无条件。
+        同一路径多条路由时，带条件的优先匹配。
+        """
+        key = (method, path.split("?", 1)[0])
+        self.json_routes.setdefault(key, []).append(
+            {"json": obj, "require_cookie": require_cookie,
+             "when_query": when_query})
+
+    def add_path(self, path, data):
+        """注册路径级原始数据（直链下载 mock，走主流程支持 Range）。"""
+        self.path_data[path] = {"data": data}
 
     def set_data(self, data, **kw):
         self.cfg = {

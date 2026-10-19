@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "mobile"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 os.environ["PANBOOST_HOME"] = tempfile.mkdtemp(prefix="pbmobile_")
 os.environ.setdefault("PANBOOST_NO_FSYNC", "1")
@@ -367,6 +368,44 @@ def main():
     files = list(Path(tmp).glob("b.bin"))
     check("壳-关闭记录仍正常下载", files and files[0].read_bytes() == data)
     app.on_rec_toggle(True)
+
+    # ---- v1.8.0 分享链接解析（123 多文件 mock 端到端） ----
+    import json as _json
+    d3a = os.urandom(200 * 1024)
+    d3b = os.urandom(150 * 1024)
+    srv3 = TestServer()
+    srv3.add_path("/dl/a.bin", d3a)
+    srv3.add_path("/dl/b.bin", d3b)
+    srv3.add_json("/api/share/info",
+                  {"code": 0, "data": {"ShareKey": "k1", "ShareKeyID": 9}})
+    srv3.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
+        {"FileId": 1, "FileName": "a.bin", "Size": len(d3a),
+         "S3KeyTag": "t1", "IsDir": 0},
+        {"FileId": 2, "FileName": "b.bin", "Size": len(d3b),
+         "S3KeyTag": "t2", "IsDir": 0}]}})
+    srv3.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
+        {"DownloadUrl": f"{srv3.url}/dl/a.bin"}]}},
+        when_query="S3KeyTag=t1")
+    srv3.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
+        {"DownloadUrl": f"{srv3.url}/dl/b.bin"}]}},
+        when_query="S3KeyTag=t2")
+    os.environ["PANBOOST_RESOLVER_HOSTS"] = _json.dumps(
+        {"pan123": srv3.url})
+    app._scr("download").ids.url_input.text = "https://www.123pan.com/s/k1"
+    app._scr("download").ids.cookie_input.text = ""
+    app.on_go()
+    app.worker.join(timeout=120)
+    fa = list(Path(tmp).glob("a.bin"))
+    fb = list(Path(tmp).glob("b.bin"))
+    check("壳-123分享链接多文件下载完整",
+          fa and fb and fa[0].read_bytes() == d3a
+          and fb[0].read_bytes() == d3b)
+    h4 = mobile_main.load_history()
+    check("壳-分享历史记录分享链接便于重跑",
+          h4["items"] and h4["items"][0]["url"].startswith(
+              "https://www.123pan.com/s/"),
+          str(h4["items"][:1]))
+    del os.environ["PANBOOST_RESOLVER_HOSTS"]
 
     app.del_account("127.0.0.1")
     check("壳-删除账号生效", "127.0.0.1" not in pb.load_cookie_store())

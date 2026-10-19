@@ -12,10 +12,12 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).parent
+ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT))
 from test_server import TestServer
 
-PB = [sys.executable, str(HERE / "panboost.py")]
+PB = [sys.executable, str(ROOT / "panboost.py")]
 PASS = []
 FAIL = []
 
@@ -964,6 +966,117 @@ def t_waf_block_e2e():
               or out.read_bytes() != data)
 
 
+
+# ---------------- v1.8.0 分享链接解析 ----------------
+def t_share_resolver_unit():
+    import panboost as pb
+    check("解析-识别蓝奏分享", pb.find_resolver(
+        "https://wwm.lanzou.com/iAbCdE") == "lanzou")
+    check("解析-识别123分享", pb.find_resolver(
+        "https://www.123pan.com/s/Ab12Cd") == "pan123")
+    check("解析-识别夸克分享", pb.find_resolver(
+        "https://pan.quark.cn/s/abc123") == "quark")
+    check("解析-直链不误判", pb.find_resolver(
+        "http://example.com/a.bin") is None)
+    k, c = pb._share_key(
+        "https://www.123pan.com/s/Ab12Cd?code=9x8k",
+        r"123pan\.com/s/([A-Za-z0-9]+)")
+    check("解析-分享码与提取码提取", k == "Ab12Cd" and c == "9x8k")
+    k2, c2 = pb._share_key("https://pan.quark.cn/s/Qk1#pass1",
+                           r"quark\.cn/s/([A-Za-z0-9]+)")
+    check("解析-井号提取码", k2 == "Qk1" and c2 == "pass1")
+
+
+def _mock_123(srv, d1, d2):
+    srv.add_path("/dl/a.bin", d1)
+    srv.add_path("/dl/b.bin", d2)
+    srv.add_json("/api/share/info",
+                 {"code": 0, "data": {"ShareKey": "k1", "ShareKeyID": 9}})
+    srv.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
+        {"FileId": 1, "FileName": "a.bin", "Size": len(d1),
+         "S3KeyTag": "t1", "IsDir": 0},
+        {"FileId": 2, "FileName": "b.bin", "Size": len(d2),
+         "S3KeyTag": "t2", "IsDir": 0}]}})
+    srv.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
+        {"DownloadUrl": f"{srv.url}/dl/a.bin"}]}},
+        when_query="S3KeyTag=t1")
+    srv.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
+        {"DownloadUrl": f"{srv.url}/dl/b.bin"}]}},
+        when_query="S3KeyTag=t2")
+
+
+def t_share_pan123_e2e():
+    import panboost as pb
+    d1 = os.urandom(300 * 1024)
+    d2 = os.urandom(200 * 1024)
+    srv = TestServer()
+    _mock_123(srv, d1, d2)
+    env = {"PANBOOST_RESOLVER_HOSTS": json.dumps({"pan123": srv.url})}
+    outdir = tempfile.mkdtemp(prefix="pb123share_")
+    r = run_pb("download", "https://www.123pan.com/s/k1", "-o", outdir, "--single",
+               env_extra=env)
+    ok = (r.returncode == 0
+          and (Path(outdir) / "a.bin").read_bytes() == d1
+          and (Path(outdir) / "b.bin").read_bytes() == d2)
+    check("解析-123多文件批量下载完整", ok,
+          (r.stdout + r.stderr)[-200:])
+    srv2 = TestServer()
+    srv2.add_path("/dl/only.bin", d1)
+    srv2.add_json("/api/share/info",
+                  {"code": 0, "data": {"ShareKey": "k2", "ShareKeyID": 8}})
+    srv2.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
+        {"FileId": 7, "FileName": "only.bin", "Size": len(d1),
+         "S3KeyTag": "tx", "IsDir": 0}]}})
+    srv2.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
+        {"DownloadUrl": f"{srv2.url}/dl/only.bin"}]}},
+        when_query="S3KeyTag=tx")
+    env2 = {"PANBOOST_RESOLVER_HOSTS": json.dumps({"pan123": srv2.url})}
+    out = str(Path(tempfile.mkdtemp(prefix="pb123one_")) / "only.bin")
+    r2 = run_pb("download", "https://www.123pan.com/s/k2", "-o", out, "--single",
+                env_extra=env2)
+    check("解析-123单文件直链下载", r2.returncode == 0
+          and Path(out).read_bytes() == d1, (r2.stdout + r2.stderr)[-150:])
+
+
+def t_share_quark_e2e():
+    d1 = os.urandom(256 * 1024)
+    srv = TestServer()
+    srv.add_path("/dl/q1.bin", d1)
+    srv.add_json("/1/clouddrive/share/sharepage/token",
+                 {"code": 0, "data": {"stoken": "st1"}},
+                 method="POST", require_cookie="__puus=")
+    srv.add_json("/1/clouddrive/share/sharepage/detail",
+                 {"code": 0, "data": {"list": [
+                     {"fid": "f1", "file_name": "q1.bin",
+                      "size": len(d1), "dir": False},
+                     {"fid": "d9", "file_name": "folder", "dir": True}]}})
+    srv.add_json("/1/clouddrive/share/sharepage/download",
+                 {"code": 0, "data": {
+                     "download_url": f"{srv.url}/dl/q1.bin"}},
+                 when_query="fid=f1")
+    env = {"PANBOOST_RESOLVER_HOSTS": json.dumps({"quark": srv.url})}
+    r = run_pb("download", "https://pan.quark.cn/s/Qk1", "-o", "/tmp/never.bin",
+               env_extra=env)
+    check("解析-夸克未登录友好提示",
+          r.returncode == 1 and "夸克分享解析需登录" in r.stdout + r.stderr,
+          (r.stdout + r.stderr)[-150:])
+    out = str(Path(tempfile.mkdtemp(prefix="pbquark_")) / "q1.bin")
+    r2 = run_pb("download", "https://pan.quark.cn/s/Qk1", "-o", out, "--single",
+                "--cookie", "__puus=fake123", env_extra=env)
+    check("解析-夸克登录后下载完整",
+          r2.returncode == 0 and Path(out).read_bytes() == d1,
+          (r2.stdout + r2.stderr)[-150:])
+    logs = [h for h in srv.header_log
+            if h.get("path", "").endswith("/token")]
+    check("解析-夸克API请求带Cookie",
+          logs and "__puus=fake123" in (logs[-1]["Cookie"] or ""))
+    dl = [h for h in srv.header_log
+          if h.get("path", "").endswith("/download")]
+    check("解析-夸克download请求带Cookie与Referer",
+          dl and "__puus=fake123" in (dl[-1]["Cookie"] or "")
+          and "quark.cn" in (dl[-1]["Referer"] or ""))
+
+
 def main():
     # 隔离配置目录：避免测试写入真实 ~/.panboost（antifraud.json/log）
     home = tempfile.mkdtemp(prefix="pbtest_home_")
@@ -987,7 +1100,9 @@ def main():
               t_unit_check_disk, t_unit_ctrl_v3_roundtrip, t_unit_clamp_cap,
              t_partial_block_resume_e2e, t_stall_watchdog_e2e,
              t_global_err_backoff_e2e, t_host_profile_e2e,
-             t_single_resume_e2e]
+             t_single_resume_e2e,
+             t_share_resolver_unit, t_share_pan123_e2e,
+             t_share_quark_e2e]
     risk_file = Path(home) / "antifraud.json"
     for t in tests:
         risk_file.unlink(missing_ok=True)  # 每个测试从干净风控记忆开始

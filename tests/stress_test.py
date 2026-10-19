@@ -13,10 +13,13 @@ import threading
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+HERE = Path(__file__).parent
+ROOT = HERE.parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT))
 from test_server import TestServer
 
-PB = [sys.executable, str(Path(__file__).parent / "panboost.py")]
+PB = [sys.executable, str(ROOT / "panboost.py")]
 ENV_BASE = {"PANBOOST_NO_FSYNC": "1"}
 
 

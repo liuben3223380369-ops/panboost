@@ -18,7 +18,7 @@ v1.6 聚焦**性能与压力验证**：TCP_NODELAY/SO_RCVBUF socket 调优、1MB
 -75%）、字节感知连接复用（满 32MB 才换连接，摊薄 TLS 握手）、脏标记保存（微小块场景消除每秒
 JSON 序列化）、延迟感知预防性降载（TTFB 拥塞检测）、双进程文件锁（flock 杜绝并发写坏文件）、
 探测期瞬时限流重试、`--input` 批量下载队列。9 场景压力测试（混沌/RST 风暴/kill-9 循环/双进程
-竞争/内存泄漏）全部通过，见 `stress_test.py`。
+竞争/内存泄漏）全部通过，见 `tests/stress_test.py`。
 
 > 📊 对标 aria2(43k★)/Motrix(57k★)/Gopeed(27k★)/LinkSwift(24.5k★) 等主流项目的生态调研与技术对比，
 > 见 [RESEARCH.md](RESEARCH.md)——PanBoost 是唯一内置 AIMD 自适应并发 + 403 熔断的命令行下载器。
@@ -212,11 +212,12 @@ python panboost.py download "直链" --cookie "..." -o ~/storage/downloads/movie
   Box/Yandex）。点击卡片打开网盘官方登录页（原生 WebView，验证码/
   短信/扫码均原生支持），登录后自动提取 Cookie **永久保存**，下载
   对应网盘文件自动携带；已登录网盘显示"已登录"徽标
-- **下载**：URL/Cookie 输入（留空自动匹配已登录网盘）、线程选择
-  （auto 实测，手动 8~1024；超高并发适合大文件且服务器限单连接的
-  场景，引擎自动平滑爬坡 + AIMD 降速不会瞬时连接风暴）、实时进度
-  与速度、断点续传；下载期间前台服务 + WakeLock 保活
-  （Android 12+ 锁屏/后台不断流）
+- **下载**：URL 输入（**直链或分享链接**——蓝奏/123 免登录解析，
+  夸克自动带已登录 Cookie，多文件分享批量下载、可中途停止）、Cookie
+  输入（留空自动匹配已登录网盘）、线程选择（auto 实测，手动 8~1024；
+  超高并发适合大文件且服务器限单连接的场景，引擎自动平滑爬坡 + AIMD
+  降速不会瞬时连接风暴）、实时进度与速度、断点续传；下载期间前台
+  服务 + WakeLock 保活（Android 12+ 锁屏/后台不断流）
 - **账号**：已登录网盘永久记录；也可手动粘贴任意站点 Cookie
   （按域名持久化），点击条目删除
 - **历史**：下载记录永久保存（含失败任务），可开关记录/一键清空，
@@ -275,16 +276,31 @@ python panboost.py cookie list     # 查看已导入
 python panboost.py cookie remove pan.baidu.com
 ```
 
-### 方法四：内置解析器（无需登录的公开分享）
+### 方法四：内置解析器（v1.8.0，直接粘分享链接）
 
-蓝奏云等公开分享已内置自动解析，直接粘分享链接即可：
+三家网盘分享链接已内置自动解析，**直接粘分享链接即可下载**：
+
+| 网盘 | 是否需登录 | 说明 |
+|---|---|---|
+| 蓝奏云 | 免登录 | 公开分享直接解析 |
+| 123云盘 | 免登录 | 公开分享直接解析 |
+| 夸克网盘 | 需登录 | 先在 App 首页登录夸克，或 CLI 用 `--cookie`/`--cookie-file` |
 
 ```bash
 python panboost.py download "https://pan.lanzoux.com/iXXXXXX"
-python panboost.py resolve "https://pan.lanzoux.com/iXXXXXX"   # 只解析不下载
+python panboost.py download "https://www.123pan.com/s/AbCdEf"
+python panboost.py download "https://pan.quark.cn/s/AbCdEf"          # 自动带已存夸克 Cookie
+python panboost.py download "https://www.123pan.com/s/AbCdEf?code=9x8k"  # 带提取码
+python panboost.py resolve "https://pan.quark.cn/s/AbCdEf"           # 只解析不下载（列出全部文件与直链）
 ```
 
-其他网盘的解析器可在 `panboost.py` 的 `RESOLVERS` 注册表中按示例扩展。
+- 提取码写在链接后：`?code=xxxx`（或 `#xxxx`）
+- **多文件分享自动批量下载**：`-o` 指定输出目录，逐文件下载、同域
+  礼貌间隔、失败文件列清单可重跑（断点续传自动跳过已完成文件）
+- 夸克直链下载自动携带 Cookie 与 Referer（网页端同款行为）
+- 其他网盘解析器可在 `panboost.py` 的 `RESOLVERS` 注册表按示例扩展
+  （`resolve_pan123` 为推荐模板：API 基址可被 `PANBOOST_RESOLVER_HOSTS`
+  环境变量覆盖，便于离线测试）
 
 ## 常用参数
 
@@ -346,11 +362,11 @@ download <URL>
 
 | 文件 | 说明 |
 |---|---|
-| `panboost.py` | 主程序（唯一需要的文件） |
+| `panboost.py` | 主程序（唯一需要的文件；v1.8.0 起内置蓝奏/123/夸克分享链接解析器） |
+| `mobile/` | Android 图形壳：`main.py` 界面逻辑、`pans.py` 网盘清单（数据）、`theme.py` 浅色色板、`weblogin.py` WebView 登录、`service_down.py` 前台保活服务 |
 | `test_server.py` | 测试用本地HTTP服务器（Range/限流/429+Retry-After/重定向/Cookie校验/JS挑战页/RST重置/混沌故障/拥塞排队/并发统计） |
-| `test_panboost.py` | 自动化功能测试（132项，`python3 test_panboost.py` 运行） |
-| `stress_test.py` | 压力测试（9场景21断言：混沌1024线程/kill-9循环/内存泄漏/双进程竞争/RST风暴/延迟感知等） |
-| `demo_aimd.py` | 1024线程AIMD收敛曲线演练（`python3 demo_aimd.py`） |
+| `tests/` | 测试套件：`test_panboost.py` 功能测试（132项，`python3 tests/test_panboost.py` 运行）、`stress_test.py` 压力测试、`test_server.py` 本地测试服务器 |
+| `dev/` | 开发工具：`check_kv.py` CI界面门禁、`smoke_mobile.py` 移动壳冒烟、`demo_aimd.py` 1024线程AIMD演练 |
 | `dev/bench.py` | 性能基准矩阵（1~64线程吞吐+完整性校验，`python3 dev/bench.py` 运行） |
 
 ## 合规声明
