@@ -286,20 +286,32 @@ def main():
           and "baidu.com" not in pb.load_cookie_store())
 
     # WebView 打开失败（真机 v1.7.0"卡片点击无反应"事故路径）→
-    # 必须抛回调用方并回落账号屏手动路径，绝不静默
+    # 必须抛回调用方并回落账号屏手动路径，绝不静默；
+    # v1.7.2 起：失败详情（含步骤名）显示到账号页状态栏 + 落 crash log
     mobile_main.weblogin.available = lambda: True
 
     def _boom(url, keys, on_done, title=""):
-        raise mobile_main.weblogin.WebLoginError("int too large")
+        raise mobile_main.weblogin.WebLoginError(
+            "登录层挂载失败: WebLoginError: 步骤[挂载到窗口]失败: "
+            "RuntimeException: addContentView")
 
     orig_open = mobile_main.weblogin.open_login
     mobile_main.weblogin.open_login = _boom
+    n_crash0 = len(list(Path(tmp).glob("crash-*.log")))
     app.pan_login("quark")
     mobile_main.weblogin.open_login = orig_open
+    acc_st = app._scr("accounts").ids.accounts_status.text
     check("壳-WebView失败回落账号屏手动路径",
           app._scr("accounts").ids.domain_input.text == "quark.cn"
-          and app.root.current == "accounts"
-          and "失败" in app._scr("home").ids.home_status.text)
+          and app.root.current == "accounts")
+    check("壳-WebView失败详情可见（账号页状态栏含步骤名）",
+          "WebView 登录打开失败" in acc_st
+          and "步骤[挂载到窗口]" in acc_st
+          and "手动模式" in acc_st, acc_st[:80])
+    check("壳-WebView失败已落crash日志",
+          len(list(Path(tmp).glob("crash-*.log"))) == n_crash0 + 1
+          and "weblogin 打开失败[quark]" in sorted(
+              Path(tmp).glob("crash-*.log"))[-1].read_text(encoding="utf-8"))
 
     # 按钮回调异常兜底：guard 捕获 + crash log 落盘 + 首页可见提示
     n_before = len(list(Path(tmp).glob("crash-*.log")))

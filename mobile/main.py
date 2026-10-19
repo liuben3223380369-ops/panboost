@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.7.1。
+"""PanBoost Android 图形壳（Kivy）v1.7.2。
+
+v1.7.2：WebView 登录层挂载失败可诊断——失败详情（含具体步骤名）
+显示到账号页状态栏（用户实际所在屏）+ 落 crash-*.log；weblogin
+挂载分步自检（关键/非关键步骤分级），UI 线程超时防幽灵层。
 
 v1.7.1：修复真机"网盘卡片点击无反应"——WebView 层颜色参数 Java int
 溢出 + UI 线程异常静默丢失（见 weblogin.py）；按钮回调统一异常兜底
@@ -42,7 +46,7 @@ import weblogin  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.7.1"
+SHELL_VERSION = "1.7.2"
 
 # ---------------- 浅色主题色板 ----------------
 BG = (0.957, 0.965, 0.984, 1)          # 页面底 #F4F6FB
@@ -177,12 +181,17 @@ def external_files_dir():
 
 
 def _dump_crash(tag):
-    """未捕获异常写 crash-*.log 到外部私有目录（可取回诊断）。"""
+    """未捕获异常写 crash-*.log 到外部私有目录（可取回诊断）。
+
+    文件名带微秒后缀：秒级精度下同秒多次异常会互相覆盖丢日志。"""
     try:
         import traceback
         d = external_files_dir()
         os.makedirs(d, exist_ok=True)
-        p = os.path.join(d, "crash-%s.log" % time.strftime("%Y%m%d-%H%M%S"))
+        p = os.path.join(
+            d, "crash-%s-%06d.log" % (
+                time.strftime("%Y%m%d-%H%M%S"),
+                time.time_ns() % 1000000))
         with open(p, "w", encoding="utf-8") as f:
             f.write(tag + traceback.format_exc())
     except Exception:
@@ -633,7 +642,9 @@ ScreenManager:
             font_size: sp(11)
             color: 0.396, 0.447, 0.533, 1
             size_hint_y: None
-            height: dp(18)
+            height: max(self.texture_size[1], dp(18))
+            text_size: (self.width - dp(4), None)
+            halign: 'left'
 
         ScrollView:
             GridLayout:
@@ -793,6 +804,7 @@ class PanBoostApp(App):
         if self.worker is not None and self.worker.is_alive():
             self._home_status("下载进行中，请等待完成后再登录")
             return
+        err_txt = None
         if weblogin.available():
             def on_done(cookie, auto):
                 self._after_login(pan_key, cookie, auto)
@@ -805,12 +817,20 @@ class PanBoostApp(App):
                        else "（登录后请点顶部按钮返回）"))
                 return
             except Exception as e:
-                self._home_status(f"登录窗口打开失败（{e}），请手动添加 Cookie")
-        # 回退：跳账号屏手动粘贴（预填域名）
+                err_txt = f"{type(e).__name__}: {e}"
+                _dump_crash("weblogin 打开失败[%s]: " % pan_key)
+        # 回退：跳账号屏手动粘贴（预填域名）；WebView 失败详情必须
+        # 显示到用户实际所在的账号页（v1.7.1 写首页状态栏用户看不到）
         acc = self._scr("accounts").ids
         acc.domain_input.text = pan["domains"][0]
-        acc.accounts_status.text = (
-            f"请在浏览器登录 {pan['name']}，复制 Cookie 粘贴到此处保存")
+        if err_txt:
+            acc.accounts_status.text = (
+                f"WebView 登录打开失败：{err_txt[:110]}\n"
+                f"已切手动模式：浏览器登录 {pan['name']} 后复制 Cookie "
+                "粘贴保存；详情见 crash-*.log")
+        else:
+            acc.accounts_status.text = (
+                f"请在浏览器登录 {pan['name']}，复制 Cookie 粘贴到此处保存")
         self.go("accounts")
 
     def _after_login(self, pan_key, cookie, auto):

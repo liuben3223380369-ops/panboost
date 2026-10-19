@@ -80,12 +80,18 @@ def main():
         "颜色字面量未经 _jcolor（Java int 溢出，真机静默炸点）"
     assert "def _jcolor" in wsrc, "缺 _jcolor 符号转换"
     assert "opened_evt" in wsrc, "UI 挂载结果未确认回传（fire-and-forget）"
+    assert "步骤[" in wsrc, "挂载缺分步自检（失败无法定位步骤）"
     assert hasattr(weblogin, "open_login") and hasattr(weblogin, "available")
     # 按钮回调必须经 _guard 兜底（异常可见，不静默进 logcat）
     msrc = Path(m.__file__).read_text(encoding="utf-8")
     assert "lambda _b, k=pan" not in msrc and "lambda _b, u=it" not in msrc, \
         "宫格/历史按钮仍有未兜底的裸 lambda 回调"
     assert "_guard" in msrc, "缺 _guard 回调兜底"
+    # WebView 失败必须落 crash log 且详情显示到账号页（v1.7.2 事故：
+    # 详情写首页状态栏，用户已跳走看不到）
+    assert '_dump_crash("weblogin 打开失败' in msrc, \
+        "WebView 失败未落 crash log"
+    assert "err_txt[:110]" in msrc, "WebView 失败详情未显示到账号页"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

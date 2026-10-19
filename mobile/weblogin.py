@@ -91,29 +91,56 @@ def _jcolor(argb):
 
 
 def _ui_open(url, title, on_manual_done):
-    """在 UI 线程挂载覆盖层：[完成登录按钮 + WebView] 全屏。"""
-    LinearLayout = autoclass("android.widget.LinearLayout")
-    Button = autoclass("android.widget.Button")
-    WebView = autoclass("android.webkit.WebView")
-    LayoutParams = autoclass("android.view.ViewGroup$LayoutParams")
-    activity = _activity()
+    """在 UI 线程挂载覆盖层：[完成登录按钮 + WebView] 全屏。
 
-    root = LinearLayout(activity)
-    root.setOrientation(LinearLayout.VERTICAL)
+    分步执行并标记失败步骤（真机诊断）：关键步骤失败抛
+    WebLoginError（消息含步骤名）；非关键步骤（配色/Cookie/缩放）
+    失败跳过，不阻塞登录层弹出。
+    """
+    def _step(name, fn, critical=True):
+        try:
+            return fn()
+        except Exception as e:
+            if critical:
+                raise WebLoginError(
+                    f"步骤[{name}]失败: {type(e).__name__}: {e}")
+            return None
 
-    btn = Button(activity)
-    btn.setText("完成登录后点这里返回 ▸")
-    btn.setBackgroundColor(_jcolor(0xFF2563EB))
-    btn.setTextColor(_jcolor(0xFFFFFFFF))
-    btn.setOnClickListener(_ClickListener(on_manual_done))
-    root.addView(btn, LayoutParams(-1, 160))
+    LinearLayout = _step("加载LinearLayout类",
+                         lambda: autoclass("android.widget.LinearLayout"))
+    Button = _step("加载Button类",
+                   lambda: autoclass("android.widget.Button"))
+    WebView = _step("加载WebView类",
+                    lambda: autoclass("android.webkit.WebView"))
+    LayoutParams = _step("加载LayoutParams类",
+                         lambda: autoclass(
+                             "android.view.ViewGroup$LayoutParams"))
+    activity = _step("获取Activity", _activity)
 
-    wv = WebView(activity)
-    settings = wv.getSettings()
-    settings.setJavaScriptEnabled(True)
-    settings.setDomStorageEnabled(True)
-    settings.setSupportZoomControls(True)
-    try:
+    root = _step("构造容器", lambda: LinearLayout(activity))
+    _step("容器纵向排列",
+          lambda: root.setOrientation(LinearLayout.VERTICAL), critical=False)
+
+    btn = _step("构造返回按钮", lambda: Button(activity))
+    _step("按钮文字", lambda: btn.setText("完成登录后点这里返回 ▸"),
+          critical=False)
+    _step("按钮配色",
+          lambda: (btn.setBackgroundColor(_jcolor(0xFF2563EB)),
+                   btn.setTextColor(_jcolor(0xFFFFFFFF))), critical=False)
+    _step("按钮绑定点击", lambda: btn.setOnClickListener(
+        _ClickListener(on_manual_done)))
+    _step("按钮入容器", lambda: root.addView(btn, LayoutParams(-1, 160)))
+
+    wv = _step("构造WebView", lambda: WebView(activity))
+
+    def _cfg():
+        settings = wv.getSettings()
+        settings.setJavaScriptEnabled(True)
+        settings.setDomStorageEnabled(True)
+        settings.setSupportZoomControls(True)
+    _step("WebView基础配置", _cfg, critical=False)
+
+    def _cookie():
         CookieManager = autoclass("android.webkit.CookieManager")
         cm = CookieManager.getInstance()
         cm.setAcceptCookie(True)
@@ -121,12 +148,13 @@ def _ui_open(url, title, on_manual_done):
             cm.setAcceptThirdPartyCookies(wv, True)
         except Exception:
             pass
-    except Exception:
-        pass
-    wv.loadUrl(url)
-    root.addView(wv, LayoutParams(-1, -1))
+    _step("CookieManager配置", _cookie, critical=False)
 
-    activity.addContentView(root, LayoutParams(-1, -1))
+    _step("加载登录页", lambda: wv.loadUrl(url))
+    _step("WebView入容器", lambda: root.addView(wv, LayoutParams(-1, -1)))
+    _step("挂载到窗口", lambda: activity.addContentView(
+        root, LayoutParams(-1, -1)))
+
     _STATE["root"] = root
     _STATE["webview"] = wv
     _STATE["closed"].clear()
@@ -223,10 +251,25 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
     # 表象即"点击卡片无反应"。
     opened = {}
     opened_evt = threading.Event()
+    aborted = []
 
     def _safe_open():
         try:
+            if aborted:
+                return  # 等待期已判超时失败，不再挂载（防幽灵层）
             _ui_open(url, title, lambda: _finish(False))
+            if aborted:
+                # 极小窗口：挂载完成才发现已被判超时 → 立即撤下
+                try:
+                    parent = _STATE["root"].getParent()
+                    if parent is not None:
+                        parent.removeView(_STATE["root"])
+                except Exception:
+                    pass
+                _STATE["root"] = None
+                _STATE["webview"] = None
+                _STATE["closed"].set()
+                return
             opened["ok"] = True
         except Exception as e:
             opened["err"] = f"{type(e).__name__}: {e}"
@@ -236,10 +279,11 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
     try:
         _run_ui(_safe_open)
     except Exception as e:
-        raise WebLoginError(f"无法调度 UI 线程: {e}")
+        raise WebLoginError(f"无法调度UI线程: {e}")
     if not opened_evt.wait(8.0):
+        aborted.append(True)
         _STATE["closed"].set()
-        raise WebLoginError("UI 线程 8 秒无响应")
+        raise WebLoginError("UI线程8秒无响应（UI线程可能被阻塞）")
     if not opened.get("ok"):
         _STATE["closed"].set()
         raise WebLoginError(f"登录层挂载失败: {opened.get('err')}")
