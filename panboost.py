@@ -2181,7 +2181,7 @@ def _run_once(args):
             return dl.run(), output
         finally:
             _task_ref["obj"] = None
-    threads = args.threads
+    threads = max(1, min(args.threads, MAX_THREADS))
     host = url_host(probe.final_url)
     risk = HostRiskStore()
     cooldown_left = risk.cooldown_left(host)

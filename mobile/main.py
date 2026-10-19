@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.6.2。
+"""PanBoost Android 图形壳（Kivy）v1.6.3。
 
 三屏界面：
   下载 —— URL/线程/进度/日志（引擎反风控全量生效）
@@ -8,6 +8,10 @@
 
 字体：fonts/cjk.ttf（Noto Sans SC 子集，21985 字符）重注册为 Kivy
 默认字体 Roboto——修复默认字体无 CJK 字形导致的中文方块乱码。
+
+v1.6.3：线程选项补全至 1024（引擎 MAX_THREADS=1024；建议仅对大文件
+且服务器允许时使用超高并发，引擎会平滑爬坡并自动 AIMD 降速），
+下拉列表改紧凑行高适配小屏。
 
 v1.6.2：修复 v1.6.1 启动闪退——KV 引用的 MainScreen/AccountsScreen/
 HistoryScreen 此前未在 Python 定义，Kivy Builder 实例化时抛
@@ -60,7 +64,7 @@ from kivy.uix.button import Button  # noqa: E402
 from kivy.uix.label import Label  # noqa: E402
 from kivy.uix.screenmanager import Screen  # noqa: E402
 
-SHELL_VERSION = "1.6.2"
+SHELL_VERSION = "1.6.3"
 
 
 class MainScreen(Screen):
@@ -165,6 +169,10 @@ def add_history(entry):
 
 
 KV = """
+<CompactOption@SpinnerOption>:
+    height: dp(30)
+    font_size: sp(12)
+
 ScreenManager:
     MainScreen:
     AccountsScreen:
@@ -210,7 +218,8 @@ ScreenManager:
             Spinner:
                 id: threads_spinner
                 text: 'auto'
-                values: ['auto', '8', '16', '32', '64', '128']
+                values: ['auto', '8', '16', '32', '64', '128', '256', '512', '1024']
+                option_cls: CompactOption
                 size_hint_x: 0.35
             Switch:
                 id: insecure_switch

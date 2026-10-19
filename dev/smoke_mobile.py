@@ -173,6 +173,12 @@ def main():
     missing = [n for n in custom if n not in defined]
     check("壳-KV自定义类均有Python定义", not missing and bool(custom),
           f"自定义类={custom} 缺失={missing}")
+    vals = re.search(r"values: \[([^\]]+)\]", mobile_main.KV).group(1)
+    check("壳-线程选项含512/1024", "'512'" in vals and "'1024'" in vals,
+          vals)
+    check("壳-下拉紧凑行高防小屏截断",
+          "CompactOption" in mobile_main.KV
+          and "option_cls: CompactOption" in mobile_main.KV)
     check("壳-三屏类已定义且为Screen子类",
           all(issubclass(getattr(mobile_main, n, type(None)), _Screen)
               for n in ("MainScreen", "AccountsScreen", "HistoryScreen")))
