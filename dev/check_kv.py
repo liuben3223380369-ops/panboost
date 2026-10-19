@@ -59,11 +59,14 @@ def main():
         miss = ids - got
         assert not miss, f"{scr} 屏缺少组件: {miss}"
 
-    for fn in ("on_go", "go", "pan_login", "record_login", "save_account",
+    for fn in ("record_login", "remove_login", "load_accounts",
+               "save_accounts", "start_keepalive", "stop_keepalive"):
+        assert hasattr(m, fn), f"缺少模块函数 {fn}"
+    for fn in ("on_go", "go", "pan_login", "_after_login", "save_account",
                "del_account", "refresh_accounts", "refresh_history",
                "rerun", "clear_history", "on_rec_toggle",
-               "start_keepalive", "stop_keepalive"):
-        assert hasattr(m, fn), f"缺少函数 {fn}"
+               "_build_pan_grid"):
+        assert hasattr(m.PanBoostApp, fn), f"缺少 App 方法 {fn}"
     assert len(m.PANS) >= 18, "网盘清单不足 18 家"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
