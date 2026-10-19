@@ -68,7 +68,7 @@ def main():
     vals = [str(v) for v in spinner.values]
     assert "512" in vals and "1024" in vals, f"线程选项缺失: {vals}"
     spinner._build_dropdown()
-    opts = [w for w in spinner.dropdown.container.children
+    opts = [w for w in spinner._dropdown.children
             if isinstance(w, SpinnerOption)]
     assert len(opts) == len(vals), \
         f"下拉构建失败: {len(opts)}/{len(vals)}"
