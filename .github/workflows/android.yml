@@ -61,7 +61,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.7.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.7.1-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -74,10 +74,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.7.0 大版本更新）。' '浅色界面全面重设计；首页内置 18 家国内外网盘入口（百度/夸克/阿里/微云/天翼/移动/迅雷/123/蓝奏/坚果/UC/Google Drive/Dropbox/OneDrive/MEGA/pCloud/Box/Yandex），点击卡片登录并永久保存 Cookie，下载自动携带。' '下载保活：前台服务 + WakeLock，Android 12+ 锁屏/后台下载不断流。' '线程选项至 1024；异常请在应用文件目录取 crash-*.log 反馈。' '命令行完整功能请用 Termux，见 README 在 Android 手机上使用 章节。' > "$NOTES_FILE"
-          TAG="android-v1.7.0"
+          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.7.1）。' 'v1.7.1 修复真机首页网盘卡片点击无反应：WebView 层颜色参数 Java int 溢出 + UI 线程异常静默丢失；登录层打开失败自动回落账号页手动粘贴 Cookie；按钮回调异常统一兜底（crash log + 首页状态栏提示）。' 'v1.7.0：浅色界面全面重设计；首页 18 家国内外网盘入口（百度/夸克/阿里/微云/天翼/移动/迅雷/123/蓝奏/坚果/UC/Google Drive/Dropbox/OneDrive/MEGA/pCloud/Box/Yandex），登录 Cookie 永久保存、下载自动携带；前台服务保活锁屏不断流。' '线程选项至 1024；异常请在应用文件目录取 crash-*.log 反馈。' '命令行完整功能请用 Termux，见 README 在 Android 手机上使用 章节。' > "$NOTES_FILE"
+          TAG="android-v1.7.1"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.7.0" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.7.1" --latest --notes-file "$NOTES_FILE"
           fi

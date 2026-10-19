@@ -11,6 +11,7 @@
 """
 import os
 import sys
+from pathlib import Path
 
 os.environ.setdefault("KIVY_NO_ARGS", "1")
 os.environ.setdefault("PANBOOST_HOME", "/tmp/panboost_kv_check")
@@ -68,6 +69,23 @@ def main():
                "_build_pan_grid"):
         assert hasattr(m.PanBoostApp, fn), f"缺少 App 方法 {fn}"
     assert len(m.PANS) >= 18, "网盘清单不足 18 家"
+
+    # weblogin 静态门禁：真机"卡片点击无反应"根因（颜色 Java int 溢出
+    # + UI 线程异步异常静默丢失）CI 无法运行 WebView，靠静态扫描防回归
+    import weblogin
+    wsrc = Path(weblogin.__file__).read_text(encoding="utf-8")
+    assert "setBackgroundColor(0x" not in wsrc, \
+        "颜色字面量未经 _jcolor（Java int 溢出，真机静默炸点）"
+    assert "setTextColor(0x" not in wsrc, \
+        "颜色字面量未经 _jcolor（Java int 溢出，真机静默炸点）"
+    assert "def _jcolor" in wsrc, "缺 _jcolor 符号转换"
+    assert "opened_evt" in wsrc, "UI 挂载结果未确认回传（fire-and-forget）"
+    assert hasattr(weblogin, "open_login") and hasattr(weblogin, "available")
+    # 按钮回调必须经 _guard 兜底（异常可见，不静默进 logcat）
+    msrc = Path(m.__file__).read_text(encoding="utf-8")
+    assert "lambda _b, k=pan" not in msrc and "lambda _b, u=it" not in msrc, \
+        "宫格/历史按钮仍有未兜底的裸 lambda 回调"
+    assert "_guard" in msrc, "缺 _guard 回调兜底"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

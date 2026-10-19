@@ -285,6 +285,29 @@ def main():
     check("壳-删除登录双清", "baidu" not in mobile_main.load_accounts()
           and "baidu.com" not in pb.load_cookie_store())
 
+    # WebView 打开失败（真机 v1.7.0"卡片点击无反应"事故路径）→
+    # 必须抛回调用方并回落账号屏手动路径，绝不静默
+    mobile_main.weblogin.available = lambda: True
+
+    def _boom(url, keys, on_done, title=""):
+        raise mobile_main.weblogin.WebLoginError("int too large")
+
+    orig_open = mobile_main.weblogin.open_login
+    mobile_main.weblogin.open_login = _boom
+    app.pan_login("quark")
+    mobile_main.weblogin.open_login = orig_open
+    check("壳-WebView失败回落账号屏手动路径",
+          app._scr("accounts").ids.domain_input.text == "quark.cn"
+          and app.root.current == "accounts"
+          and "失败" in app._scr("home").ids.home_status.text)
+
+    # 按钮回调异常兜底：guard 捕获 + crash log 落盘 + 首页可见提示
+    n_before = len(list(Path(tmp).glob("crash-*.log")))
+    app._guard(lambda: 1 / 0)(None)
+    n_after = len(list(Path(tmp).glob("crash-*.log")))
+    check("壳-回调异常guard兜底", n_after == n_before + 1
+          and "操作失败" in app._scr("home").ids.home_status.text)
+
     # ---- 手动账号 + 自动匹配下载 + 前台保活 ----
     app._scr("accounts").ids.domain_input.text = "127.0.0.1"
     app._scr("accounts").ids.cookie_input.text = "SID=auto123"

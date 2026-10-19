@@ -81,6 +81,15 @@ def _run_ui(fn):
     _activity().runOnUiThread(_Runnable(fn))
 
 
+def _jcolor(argb):
+    """ARGB 颜色字面量转 Java int（带符号 32 位）。
+
+    0xFF2563EB 等超出 Java Integer.MAX_VALUE，pyjnius 传参会抛
+    OverflowError——v1.7.0 真机"网盘卡片点击无反应"根因之一。
+    """
+    return argb - 0x100000000 if argb >= 0x80000000 else argb
+
+
 def _ui_open(url, title, on_manual_done):
     """在 UI 线程挂载覆盖层：[完成登录按钮 + WebView] 全屏。"""
     LinearLayout = autoclass("android.widget.LinearLayout")
@@ -94,9 +103,8 @@ def _ui_open(url, title, on_manual_done):
 
     btn = Button(activity)
     btn.setText("完成登录后点这里返回 ▸")
-    btn.setBackgroundColor(0xFF2563EB)
-    btn.setTextColor(0xFFFFFFFF)
-    btn.setHeight(160)
+    btn.setBackgroundColor(_jcolor(0xFF2563EB))
+    btn.setTextColor(_jcolor(0xFFFFFFFF))
     btn.setOnClickListener(_ClickListener(on_manual_done))
     root.addView(btn, LayoutParams(-1, 160))
 
@@ -195,7 +203,11 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
         try:
             _run_ui(_ui_close)
         except Exception:
-            _ui_close()
+            # post 失败（几乎不可能）：只重置状态；绝不在非 UI 线程
+            # 直接操作视图（Android 会抛 CalledFromWrongThread）
+            _STATE["root"] = None
+            _STATE["webview"] = None
+            _STATE["closed"].set()
         poller = _STATE["poller"]
         if poller is not None:
             poller["stop"] = True
@@ -206,7 +218,31 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
             except Exception:
                 pass
 
-    _run_ui(lambda: _ui_open(url, title, lambda: _finish(False)))
+    # UI 层挂载结果必须确认回传：runOnUiThread 是异步 post，异常不会
+    # 传播回调用方——v1.7.0 的 fire-and-forget 让挂载失败完全静默，
+    # 表象即"点击卡片无反应"。
+    opened = {}
+    opened_evt = threading.Event()
+
+    def _safe_open():
+        try:
+            _ui_open(url, title, lambda: _finish(False))
+            opened["ok"] = True
+        except Exception as e:
+            opened["err"] = f"{type(e).__name__}: {e}"
+        finally:
+            opened_evt.set()
+
+    try:
+        _run_ui(_safe_open)
+    except Exception as e:
+        raise WebLoginError(f"无法调度 UI 线程: {e}")
+    if not opened_evt.wait(8.0):
+        _STATE["closed"].set()
+        raise WebLoginError("UI 线程 8 秒无响应")
+    if not opened.get("ok"):
+        _STATE["closed"].set()
+        raise WebLoginError(f"登录层挂载失败: {opened.get('err')}")
 
     def _poll():
         keys = [k.lower() for k in auth_keys]
@@ -226,7 +262,6 @@ def open_login(url, auth_keys=(), on_done=None, title="登录"):
 
     t = threading.Thread(target=_poll, daemon=True)
     _STATE["poller"] = {"stop": False}
-    _STATE["closed"].clear()
     t.start()
     return True
 

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.7.0。
+"""PanBoost Android 图形壳（Kivy）v1.7.1。
+
+v1.7.1：修复真机"网盘卡片点击无反应"——WebView 层颜色参数 Java int
+溢出 + UI 线程异常静默丢失（见 weblogin.py）；按钮回调统一异常兜底
+（落 crash-*.log + 首页状态栏可见提示），登录层打开失败自动回落
+账号页手动粘贴 Cookie。
 
 v1.7.0：浅色 UI 全面重设计 + 首页网盘登录入口。
 
@@ -37,7 +42,7 @@ import weblogin  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.7.0"
+SHELL_VERSION = "1.7.1"
 
 # ---------------- 浅色主题色板 ----------------
 BG = (0.957, 0.965, 0.984, 1)          # 页面底 #F4F6FB
@@ -171,22 +176,23 @@ def external_files_dir():
     return str(Path(__file__).parent / "downloads")
 
 
+def _dump_crash(tag):
+    """未捕获异常写 crash-*.log 到外部私有目录（可取回诊断）。"""
+    try:
+        import traceback
+        d = external_files_dir()
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, "crash-%s.log" % time.strftime("%Y%m%d-%H%M%S"))
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(tag + traceback.format_exc())
+    except Exception:
+        pass
+
+
 def _install_crash_logger():
     """崩溃兜底：未捕获异常写 crash-*.log 到外部私有目录（可取回诊断）。"""
-    def _dump(tag):
-        try:
-            import traceback
-            d = external_files_dir()
-            os.makedirs(d, exist_ok=True)
-            p = os.path.join(
-                d, "crash-%s.log" % time.strftime("%Y%m%d-%H%M%S"))
-            with open(p, "w", encoding="utf-8") as f:
-                f.write(tag + traceback.format_exc())
-        except Exception:
-            pass
-
     def _hook(t, v, tb):
-        _dump("sys.excepthook: %s: %s\n" % (t.__name__, v))
+        _dump_crash("sys.excepthook: %s: %s\n" % (t.__name__, v))
         sys.__excepthook__(t, v, tb)
 
     sys.excepthook = _hook
@@ -717,6 +723,20 @@ class PanBoostApp(App):
 
     # ---------- 屏幕与设置 ----------
 
+    def _guard(self, fn, *args):
+        """按钮回调异常兜底：Kivy 只把回调异常写 logcat（用户无感知），
+        这里落 crash-*.log 并显示到首页状态栏——绝不静默。"""
+        def wrap(_btn):
+            try:
+                fn(*args)
+            except Exception as e:
+                _dump_crash("ui callback %s: " % getattr(fn, "__name__", fn))
+                try:
+                    self._home_status(f"操作失败: {type(e).__name__}: {e}")
+                except Exception:
+                    pass
+        return wrap
+
     def go(self, name):
         self.root.current = name
         if name == "accounts":
@@ -756,7 +776,7 @@ class PanBoostApp(App):
                 text=txt, markup=True, font_size=sp(13),
                 size_hint_y=None, height=dp(84),
                 halign="center", valign="middle")
-            btn.bind(on_release=lambda _b, k=pan["key"]: self.pan_login(k))
+            btn.bind(on_release=self._guard(self.pan_login, pan["key"]))
             grid.add_widget(btn)
 
     def _home_status(self, msg):
@@ -848,7 +868,7 @@ class PanBoostApp(App):
                 text=f"{title}\n[sub]{sub}[/sub]", markup=True,
                 font_size=sp(12), size_hint_y=None, height=dp(52),
                 halign="left", valign="middle")
-            btn.bind(on_release=lambda _b, k=key: self.del_account(k))
+            btn.bind(on_release=self._guard(self.del_account, key))
             box.add_widget(btn)
 
     def del_account(self, key):
@@ -881,7 +901,7 @@ class PanBoostApp(App):
                       if it.get("speed") else ""))
             btn = CardButton(text=txt, font_size=sp(11), size_hint_y=None,
                              height=dp(36), halign="left")
-            btn.bind(on_release=lambda _b, u=it.get("url", ""): self.rerun(u))
+            btn.bind(on_release=self._guard(self.rerun, it.get("url", "")))
             box.add_widget(btn)
 
     def rerun(self, url):
