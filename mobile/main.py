@@ -63,6 +63,7 @@ from kivy.metrics import dp, sp  # noqa: E402
 from kivy.uix.button import Button  # noqa: E402
 from kivy.uix.label import Label  # noqa: E402
 from kivy.uix.screenmanager import Screen  # noqa: E402
+from kivy.uix.spinner import SpinnerOption  # noqa: E402
 
 SHELL_VERSION = "1.6.3"
 
@@ -77,6 +78,15 @@ class AccountsScreen(Screen):
 
 
 class HistoryScreen(Screen):
+    pass
+
+
+class CompactOption(SpinnerOption):
+    """紧凑下拉行（30dp）：9 个线程选项在小屏上不截断。
+
+    注意：KV 属性值位置（如 option_cls:）是表达式求值上下文，
+    类名必须经 app 属性传入，动态类 @ 语法在此不可见（v1.6.3 CI
+    门禁抓到的问题）。"""
     pass
 
 
@@ -169,7 +179,7 @@ def add_history(entry):
 
 
 KV = """
-<CompactOption@SpinnerOption>:
+<CompactOption>:
     height: dp(30)
     font_size: sp(12)
 
@@ -219,7 +229,7 @@ ScreenManager:
                 id: threads_spinner
                 text: 'auto'
                 values: ['auto', '8', '16', '32', '64', '128', '256', '512', '1024']
-                option_cls: CompactOption
+                option_cls: app.compact_option
                 size_hint_x: 0.35
             Switch:
                 id: insecure_switch
@@ -384,6 +394,7 @@ ScreenManager:
 
 class PanBoostApp(App):
     title = "PanBoost"
+    compact_option = CompactOption
 
     def build(self):
         self.shell_version = SHELL_VERSION

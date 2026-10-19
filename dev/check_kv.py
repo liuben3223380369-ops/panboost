@@ -61,6 +61,18 @@ def main():
                  "clear_history", "on_rec_toggle"):
         assert hasattr(m.PanBoostApp, meth), f"缺少方法 {meth}"
 
+    spinner = root.get_screen("main").ids.threads_spinner
+    from kivy.uix.spinner import SpinnerOption
+    assert issubclass(spinner.option_cls, SpinnerOption), \
+        f"option_cls 非法: {spinner.option_cls}"
+    vals = [str(v) for v in spinner.values]
+    assert "512" in vals and "1024" in vals, f"线程选项缺失: {vals}"
+    spinner._build_dropdown()
+    opts = [w for w in spinner.dropdown.container.children
+            if isinstance(w, SpinnerOption)]
+    assert len(opts) == len(vals), \
+        f"下拉构建失败: {len(opts)}/{len(vals)}"
+
     print("check_kv: OK")
 
 

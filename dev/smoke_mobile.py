@@ -112,6 +112,10 @@ class _Screen(_Widget):
 
 sm_mod.Screen = _Screen
 sm_mod.ScreenManager = _Widget
+spin_mod = types.ModuleType("kivy.uix.spinner")
+spin_mod.SpinnerOption = _Widget
+spin_mod.Spinner = _Widget
+sm_mod.ScreenManager = _Widget
 
 
 class _LabelBase:
@@ -136,6 +140,7 @@ sys.modules.update({
     "kivy.uix": uix_mod, "kivy.uix.button": btn_mod,
     "kivy.uix.label": lbl_mod, "kivy.core": core_mod,
     "kivy.core.text": text_mod, "kivy.uix.screenmanager": sm_mod,
+    "kivy.uix.spinner": spin_mod,
 })
 
 import main as mobile_main  # noqa: E402
@@ -178,7 +183,9 @@ def main():
           vals)
     check("壳-下拉紧凑行高防小屏截断",
           "CompactOption" in mobile_main.KV
-          and "option_cls: CompactOption" in mobile_main.KV)
+          and "option_cls: app.compact_option" in mobile_main.KV
+          and hasattr(mobile_main, "CompactOption")
+          and hasattr(mobile_main.PanBoostApp, "compact_option"))
     check("壳-三屏类已定义且为Screen子类",
           all(issubclass(getattr(mobile_main, n, type(None)), _Screen)
               for n in ("MainScreen", "AccountsScreen", "HistoryScreen")))
