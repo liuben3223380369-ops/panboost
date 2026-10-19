@@ -1,5 +1,26 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.8.2。
+"""PanBoost Android 图形壳（Kivy）v1.8.3。
+
+v1.8.3（真机反馈第三轮，SDL 源码实锤）：v1.8.2 后百度已正常
+（passport 登录页生效），但 ①其他网盘卡片仍跳"下载网盘APP"
+界面；②"无法返回主页"自 v1.8.1 起始终未修复。抓 SDL 官方
+SDLActivity.java（release-2.26.x）源码定位真正根因——
+①手势返回无效：onBackPressed() 里 trap=SDL_ANDROID_TRAP_BACK_
+  BUTTON 为真时直接 return（什么都不做）。Android 10+ 手势导航
+  的返回手势不产生键盘事件、直接调 onBackPressed——trap=1 手势
+  被吞（无反应），trap=0 退出整个 App；OnKeyListener 只收硬件
+  键收不到手势——v1.8.1(vcode 27)/v1.8.2(OnKeyListener+trap)
+  三条路对手势全部无效。修复：WebView 登录层改全屏 Dialog 承载
+  ——手势/返回键自动 cancel Dialog（系统标准行为），OnCancel
+  Listener 关层，唯一系统级可靠路径。
+②其他网盘仍跳下载App：shouldOverrideUrlLoading 对服务端 302
+  重定向无效（Android 官方文档），网盘 H5 壳"跳下载App"很多
+  正是 302 落地。修复：onPageStarted 导航观测（一切导航必经
+  点）——记录导航日志（登录结束落 nav-*.log 可取回诊断）+
+  市场黑名单 URL（market:// 应用商店等）命中即 stopLoading。
+③main.py 移除 SDL trap 环境变量：Dialog 方案不需要；trap=1 反
+  而吞掉非登录屏的手势返回（无反应），移除后手势走 Android
+  标准行为（退出 App），Kivy on_keyboard(27) 仍作三键兜底。
 
 v1.8.2（联网研究根治版）：v1.8.1 的桌面 UA 修复无效，经源码级调研
 定位真正根因——
@@ -53,15 +74,13 @@ import time
 import urllib.parse
 from pathlib import Path
 
-# Android 返回键修复（v1.8.2，必须在任何 kivy/SDL import 之前）：
-# SDL_HINT_ANDROID_TRAP_BACK_BUTTON 默认 "0"——返回键由系统处理
-# （默认退出 App），根本不产生 SDL 键盘事件，Kivy 的
-# Window.on_keyboard 永远收不到 keycode 27。设为 "1" 后返回键产生
-# SDL_KEYDOWN(SDL_SCANCODE_AC_BACK)，Kivy 映射为 27 传入 on_keyboard
-# （android.map_key 在现代 p4a 已移除，映射内置在 Kivy window_sdl2）。
-# SDL 对该 hint 是运行时查询（每次按键时读进程环境变量），CPython
-# 的 os.environ 赋值同步 putenv 到 C 层，同进程 SDL 可见。
-os.environ.setdefault("SDL_ANDROID_TRAP_BACK_BUTTON", "1")
+# v1.8.3：移除 SDL_ANDROID_TRAP_BACK_BUTTON 设置（v1.8.2 曾设 "1"）。
+# SDL 源码实锤（SDLActivity.release-2.26.x onBackPressed）：trap=1
+# 时返回手势被直接吞掉（无反应）；trap=0（默认）走 Android 标准
+# 行为。Android 10+ 手势导航不产生键盘事件，Kivy 层永远收不到，
+# 登录层的返回改由全屏 Dialog 系统级处理（见 weblogin.py v1.8.3）；
+# 非登录屏手势返回走系统默认（退出 App，符合 Android 惯例），
+# 三键导航的 BACK 仍由 _on_key(keycode 27) 兜底处理。
 
 # PANBOOST_HOME 必须在 import panboost 之前设置（CONFIG_DIR 是模块级求值）
 IS_ANDROID = ("ANDROID_PRIVATE" in os.environ
@@ -81,7 +100,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.8.2"
+SHELL_VERSION = "1.8.3"
 
 
 def register_font():
@@ -169,6 +188,29 @@ def _dump_crash(tag):
                 time.time_ns() % 1000000))
         with open(p, "w", encoding="utf-8") as f:
             f.write(tag + traceback.format_exc())
+    except Exception:
+        pass
+
+
+def _dump_nav_log(pan_key):
+    """WebView 导航日志落盘 nav-*.log（v1.8.3 诊断"跳到下载App界面"）。
+
+    onPageStarted 记录的一切导航（含 302 落地与市场拦截），登录
+    结束（完成/放弃）时写到外部私有目录，用户反馈时可取回看
+    "到底跳去了哪"。"""
+    try:
+        entries = weblogin.nav_log()
+        if not entries:
+            return
+        d = external_files_dir()
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(
+            d, "nav-%s-%s.log" % (pan_key,
+                                  time.strftime("%Y%m%d-%H%M%S")))
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("PanBoost v1.8.3 WebView 导航日志 [%s]\n" % pan_key)
+            for kind, ts, u in entries:
+                f.write("[%s] %-5s %s\n" % (ts, kind, u))
     except Exception:
         pass
 
@@ -735,10 +777,11 @@ class PanBoostApp(App):
             self.refresh_history()
 
     def _on_key(self, window, key, *args):
-        """Android 返回键/手势（Kivy 收到 keycode 27）：
+        """三键导航 BACK 的 Kivy 兜底（v1.8.3：手势不经过此路径）：
 
-        登录层打开 → 网页后退/关闭登录层返回 App；
-        非首页屏 → 切回首页；首页 → 返回 False 走系统默认（退出）。
+        登录层打开 → request_back（网页后退/关闭）；非首页屏 → 切回
+        首页；首页 → 返回 False 走系统默认。手势导航与登录层内的
+        返回已由 Dialog 系统级处理（见 weblogin.py v1.8.3）。
         """
         if key != 27:
             return False
@@ -805,9 +848,11 @@ class PanBoostApp(App):
         err_txt = None
         if weblogin.available():
             def on_done(cookie, auto):
+                _dump_nav_log(pan_key)
                 self._after_login(pan_key, cookie, auto)
 
             def on_cancel():
+                _dump_nav_log(pan_key)
                 self._home_status(
                     f"已返回（{pan['name']} 登录未保存）——随时可再点卡片登录")
 
@@ -817,7 +862,7 @@ class PanBoostApp(App):
                                     on_cancel=on_cancel)
                 self._home_status(
                     f"已打开 {pan['name']} 登录页（桌面版）——"
-                    "返回键或顶部 ✕ 可回到本页"
+                    "手势/返回键或顶部 ✕ 可回到本页"
                     + ("，检测到登录将自动保存" if pan["auth_keys"]
                        else "，完成后点 ✓ 完成登录"))
                 return

@@ -110,7 +110,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "1.8.2", "壳版本未升级到 1.8.2"
+    assert m.SHELL_VERSION == "1.8.3", "壳版本未升级到 1.8.3"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -139,12 +139,33 @@ def main():
     ok2, _ = weblogin._decide_url("market://details?id=x")
     ok3, _ = weblogin._decide_url("")
     assert not ok1 and ok2 and ok3, "_decide_url 行为异常"
-    assert "SDL_ANDROID_TRAP_BACK_BUTTON" in msrc, \
-        "未开启 SDL 返回键 trap（Kivy 收不到 keycode 27 根因）"
-    assert msrc.index("SDL_ANDROID_TRAP_BACK_BUTTON") < msrc.index(
-        "import panboost"), "SDL trap 必须在引擎 import 之前设置"
     assert m.PAN_BY_KEY["baidu"]["login"] == \
         "https://passport.baidu.com/v2/?login", "百度未用 PC 统一登录页"
+
+    # v1.8.3 真机根治（SDL 源码实锤）：全屏 Dialog 承载登录层 +
+    # onPageStarted 导航观测 + 移除 SDL trap。
+    # trap=1 时 SDLActivity.onBackPressed() 直接 return 吞掉手势返回
+    # （无反应）；Android 10+ 手势不产生键盘事件，Kivy/OnKeyListener
+    # 全收不到——唯一系统级可靠路径是 Dialog（手势/返回键自动
+    # cancel → OnCancelListener 关层）
+    assert 'os.environ.setdefault("SDL_ANDROID_TRAP' not in msrc, \
+        "SDL trap 已废弃（v1.8.3 起吞手势返回，必须移除）"
+    assert "android.app.Dialog" in wsrc, "登录层未改全屏 Dialog 承载"
+    assert "setOnCancelListener" in wsrc, "Dialog 未挂取消监听（手势返回）"
+    assert "setCancelable(True)" in wsrc, "Dialog 未设可取消"
+    assert "dialog.dismiss()" in wsrc, "关闭未走 Dialog.dismiss"
+    assert "_CancelListener" in wsrc, "缺 _CancelListener 实现"
+    assert "DialogInterface$OnCancelListener" in wsrc, \
+        "取消监听接口签名异常"
+    assert "onPageStarted" in wsrc and "onPageFinished" in wsrc, \
+        "缺导航观测回调实现"
+    assert "onPageStarted" in jtxt and "onPageFinished" in jtxt, \
+        "Java 桥接类缺 onPageStarted/onPageFinished 转发"
+    assert "MARKET_PREFIXES" in wsrc, "缺市场 URL 黑名单（302 落地守卫）"
+    assert weblogin.MARKET_PREFIXES[0] == "market://", "黑名单常量异常"
+    assert "stopLoading" in wsrc, "onPageStarted 守卫未停载市场 URL"
+    assert hasattr(weblogin, "nav_log"), "缺 nav_log 导出（真机诊断）"
+    assert "_dump_nav_log" in msrc, "导航日志未落盘（诊断证据缺失）"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

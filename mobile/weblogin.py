@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 """Android WebView 网盘登录模块（pyjnius）。
 
-在 Kivy 界面上叠加原生 WebView 覆盖层，用户在真实网盘页面完成登录
+在 Kivy 界面上叠加原生 WebView 登录层，用户在真实网盘页面完成登录
 （含验证码/短信/扫码——浏览器引擎渲染，无需逆向任何网盘协议），
 登录后从 CookieManager 提取 Cookie 永久保存。
 
 设计要点：
 - 所有 Android UI 操作经 runOnUiThread 执行（Kivy 主线程非 UI 线程）
-- 桌面 UA 加载（v1.8.1）：移动 UA 会被网盘 302 到"下载客户端"页
-- v1.8.2 导航守卫：WebViewClient（Java 桥接类 PanWebViewClient，
-  经 android.add_src 编入 APK）拦截一切非 http/https 导航——
-  intent://market://tmast:// 等是"跳到下载App界面"的逃逸通道，
-  无 client 时页面 location.href 跳转全部交给系统 intent 分发
-- v1.8.2 返回键：WebView 抢焦点后自己消费 KEYCODE_BACK，
-  View$OnKeyListener（接口，pyjnius 可直接实现）在 WebView 层拦截；
-  无焦点时由 Kivy Window.on_keyboard(27) 兜底（需 SDL trap，见
-  main.py）
+- v1.8.3 全屏 Dialog 承载（根治"无法返回"）：
+  Android 10+ 手势导航的返回手势不产生键盘事件，直接调 Activity
+  onBackPressed()——此前 addContentView 覆盖层方案下，SDL trap=1
+  会把手势整个吞掉（无反应），trap=0 则退出整个 App，OnKeyListener
+  只能收硬件键收不到手势。改 Dialog 后：手势/返回键自动 cancel
+  Dialog（系统标准行为），OnCancelListener 接到回调做"网页后退→
+  关层"，这是唯一在系统层面可靠的手势返回路径
+- v1.8.3 onPageStarted 导航观测（根治"其他网盘仍跳下载App"）：
+  shouldOverrideUrlLoading 对服务端 302 重定向无效（官方文档），
+  网盘 H5 壳"跳下载App"很多正是 302 落地；onPageStarted 是一切
+  导航必经点，在此记录导航日志（真机可取回诊断）并拦截市场类 URL
+- v1.8.2 导航守卫：WebViewClient（Java 桥接类 PanWebViewClient）
+  拦截一切非 http/https 导航（intent://market:// 等逃逸通道）
+- 桌面 UA（v1.8.1）：移动 UA 会被网盘 302 到"下载客户端"页
 - 顶部双按钮：✕ 返回首页（放弃登录）/ ✓ 完成登录（提取 Cookie）
 - 后台线程轮询 CookieManager，特征键命中自动关闭并回调
 - 任何一步失败抛 WebLoginError，调用方回退到手动粘贴 Cookie 路径
@@ -87,10 +92,21 @@ class _ClickListener(PythonJavaClass):
         self._fn()
 
 
-_STATE = {"root": None, "webview": None, "poller": None,
+_STATE = {"root": None, "webview": None, "dialog": None, "poller": None,
           "on_close": None, "on_cancel": None, "done": False,
-          "client_cb": None, "key_cb": None,
+          "client_cb": None, "key_cb": None, "cancel_cb": None,
+          "nav_log": [],
           "closed": threading.Event()}
+
+
+# WebView 导航黑名单（onPageStarted 守卫用）：市场/商店类 URL 直接
+# 停止加载——这些是"跳到下载网盘APP界面"的最终落地页
+MARKET_PREFIXES = (
+    "market://", "https://market.android.com",
+    "https://play.google.com/store",
+    "https://android.myapp.com", "https://appgallery.huawei.com",
+    "https://samsungapps.com", "https://app.mi.com",
+    "https://www.coolapk.com",)
 
 
 def _run_ui(fn):
@@ -158,18 +174,63 @@ class _UrlLoadingCallback(PythonJavaClass):
 
     pyjnius 基于 java.lang.reflect.Proxy 只能实现接口，WebViewClient
     是抽象类——所以经 Java 桥接类转发（见 java_classes/）。
+
+    v1.8.3 增补 onPageStarted/onPageFinished：
+    - onPageStarted 记导航日志（_STATE["nav_log"]，真机诊断用）
+      + 市场黑名单拦截（wv.stopLoading）——302 落地不经过
+      shouldOverrideUrlLoading，这里是唯一可靠守卫点
+    - onPageFinished 落日志（页面加载完成时间线）
     """
     __javainterfaces__ = [
         "org/panboost/panwebview/PanWebViewClient$UrlLoadingCallback"]
     __javacontext__ = "app"
 
-    def __init__(self, handle):
+    def __init__(self, handle, on_nav=None):
         super().__init__()
         self._handle = handle
+        self._on_nav = on_nav
 
     @java_method("(Ljava/lang/String;)Z")
     def onUrlLoading(self, url):
         return bool(self._handle(url))
+
+    @java_method("(Ljava/lang/String;)V")
+    def onPageStarted(self, url):
+        if self._on_nav is not None:
+            try:
+                self._on_nav(url, started=True)
+            except Exception:
+                pass
+
+    @java_method("(Ljava/lang/String;)V")
+    def onPageFinished(self, url):
+        if self._on_nav is not None:
+            try:
+                self._on_nav(url, started=False)
+            except Exception:
+                pass
+
+
+class _CancelListener(PythonJavaClass):
+    """Dialog 取消监听（v1.8.3 手势返回的核心）。
+
+    Android 10+ 手势导航的返回手势直接 cancel Dialog（系统标准
+    行为，不产生键盘事件）——OnCancelListener 是接口，pyjnius 可
+    直接实现。硬件返回键同样走 Dialog.cancel()。
+    """
+    __javainterfaces__ = ["android/content/DialogInterface$OnCancelListener"]
+    __javacontext__ = "app"
+
+    def __init__(self, on_cancel):
+        super().__init__()
+        self._on_cancel = on_cancel
+
+    @java_method("(Landroid/content/DialogInterface;)V")
+    def onCancel(self, dialog):
+        try:
+            self._on_cancel()
+        except Exception:
+            pass
 
 
 class _BackKeyListener(PythonJavaClass):
@@ -298,7 +359,26 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
                 pass
         return block
 
-    client_cb = _step("构造导航回调", lambda: _UrlLoadingCallback(_handle_url))
+    # v1.8.3 onPageStarted 导航观测（WebViewClient 回调在 UI 线程，
+    # 可同步操作 WebView）：
+    # - 记导航日志（真机诊断"到底跳去了哪"，最多留 50 条）
+    # - 市场黑名单拦截：302 落地不经过 shouldOverrideUrlLoading，
+    #   onPageStarted 是唯一可靠守卫点；命中即停载并记原因
+    def _on_nav(u, started):
+        log = _STATE["nav_log"]
+        log.append(("start" if started else "done", time.strftime("%H:%M:%S"),
+                    u[:180]))
+        del log[:-50]
+        if started and u.lower().startswith(MARKET_PREFIXES):
+            log.append(("block", time.strftime("%H:%M:%S"),
+                        "市场URL已拦截: " + u[:150]))
+            try:
+                wv.stopLoading()
+            except Exception:
+                pass
+
+    client_cb = _step("构造导航回调",
+                      lambda: _UrlLoadingCallback(_handle_url, _on_nav))
     PanWebViewClient = _step(
         "加载PanWebViewClient类",
         lambda: autoclass("org.panboost.panwebview.PanWebViewClient"))
@@ -307,7 +387,8 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _step("设置WebViewClient", lambda: wv.setWebViewClient(client))
 
     # v1.8.2 返回键：WebView 抢焦点后自己消费 KEYCODE_BACK，必须在
-    # View 层挂 OnKeyListener 拦截
+    # View 层挂 OnKeyListener 拦截（硬件返回键兜底；手势返回走
+    # Dialog 的 OnCancelListener，见下）
     key_cb = _step("构造返回键监听", lambda: _BackKeyListener(on_key_back))
     _step("WebView可获焦点",
           lambda: (wv.setFocusable(True),
@@ -316,30 +397,62 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
 
     _step("加载登录页", lambda: wv.loadUrl(url))
     _step("WebView入容器", lambda: root.addView(wv, LayoutParams(-1, -1)))
-    _step("挂载到窗口", lambda: activity.addContentView(
-        root, LayoutParams(-1, -1)))
+
+    # v1.8.3 全屏 Dialog 承载（根治"无法返回"）：
+    # Android 10+ 手势返回直接 cancel Dialog（系统标准行为），不再
+    # 依赖键盘事件（此前 addContentView 覆盖层方案下手势被 SDL
+    # trap 吞掉或退出整个 App，OnKeyListener 也收不到手势）。
+    # OnCancelListener 是接口，pyjnius 可直接实现（_CancelListener）。
+    Dialog = _step("加载Dialog类", lambda: autoclass("android.app.Dialog"))
+    dialog = _step("构造Dialog", lambda: Dialog(activity))
+    cancel_cb = _step("构造取消监听", lambda: _CancelListener(on_cancel))
+    _step("Dialog可取消", lambda: dialog.setCancelable(True))
+    _step("挂载取消监听", lambda: dialog.setOnCancelListener(cancel_cb))
+    _step("Dialog装载内容", lambda: dialog.setContentView(root))
+    _step("显示Dialog", lambda: dialog.show())
 
     _STATE["root"] = root
     _STATE["webview"] = wv
+    _STATE["dialog"] = dialog
     _STATE["client_cb"] = client_cb
     _STATE["key_cb"] = key_cb
+    _STATE["cancel_cb"] = cancel_cb
     _STATE["closed"].clear()
 
 
 def _ui_close():
-    """在 UI 线程卸载覆盖层（Android 无 removeContentView，用 removeView）。"""
+    """在 UI 线程关闭登录层（v1.8.3 Dialog.dismiss 为主，removeView 兜底）。
+
+    dismiss 关闭整个 Dialog 窗口（contentView 随之卸下）；失败时回退
+    v1.8.2 的 removeView（防幽灵层）。必须清空全部强引用字段——
+    dialog/webview/client 回调被 Python GC 后 Java 侧回调会崩溃。
+    """
+    dialog = _STATE["dialog"]
     root = _STATE["root"]
-    if root is None:
+    if dialog is None and root is None:
         return
     try:
-        parent = root.getParent()
-        if parent is not None:
-            parent.removeView(root)
+        if dialog is not None:
+            dialog.dismiss()
+        elif root is not None:
+            parent = root.getParent()
+            if parent is not None:
+                parent.removeView(root)
+    except Exception:
+        try:
+            if root is not None:
+                parent = root.getParent()
+                if parent is not None:
+                    parent.removeView(root)
+        except Exception:
+            pass
     finally:
         _STATE["root"] = None
         _STATE["webview"] = None
+        _STATE["dialog"] = None
         _STATE["client_cb"] = None
         _STATE["key_cb"] = None
+        _STATE["cancel_cb"] = None
         _STATE["closed"].set()
 
 
@@ -409,6 +522,8 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
             # 直接操作视图（Android 会抛 CalledFromWrongThread）
             _STATE["root"] = None
             _STATE["webview"] = None
+            _STATE["dialog"] = None
+            _STATE["cancel_cb"] = None
             _STATE["closed"].set()
         poller = _STATE["poller"]
         if poller is not None:
@@ -453,15 +568,9 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
                      lambda: _cancel(), _key_back)
             if aborted:
                 # 极小窗口：挂载完成才发现已被判超时 → 立即撤下
-                try:
-                    parent = _STATE["root"].getParent()
-                    if parent is not None:
-                        parent.removeView(_STATE["root"])
-                except Exception:
-                    pass
-                _STATE["root"] = None
-                _STATE["webview"] = None
-                _STATE["closed"].set()
+                # （_ui_close 关 Dialog 为主，本函数已在 UI 线程，
+                # 同步调用安全）
+                _ui_close()
                 return
             opened["ok"] = True
         except Exception as e:
@@ -503,6 +612,15 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
     return True
 
 
+def nav_log():
+    """导航日志快照（v1.8.3 真机诊断"到底跳去了哪"）。
+
+    返回 [("start"|"done"|"block", "HH:MM:SS", url), ...] 最近 50 条；
+    登录层关闭后不清空，调用方可随时取走落盘。
+    """
+    return list(_STATE["nav_log"])
+
+
 def is_open():
     return _STATE["root"] is not None
 
@@ -525,6 +643,8 @@ def close_login():
         # post 失败：只重置状态，绝不在非 UI 线程操作视图
         _STATE["root"] = None
         _STATE["webview"] = None
+        _STATE["dialog"] = None
+        _STATE["cancel_cb"] = None
         _STATE["closed"].set()
     cb = _STATE.get("on_cancel")
     _STATE["on_cancel"] = None
@@ -536,8 +656,11 @@ def close_login():
 
 
 def request_back():
-    """Android 返回键/手势语义（登录层打开时）：
+    """Kivy 层键盘返回键兜底（登录层打开时）。
 
+    v1.8.3 起 Android 10+ 手势导航与硬件返回键均由 Dialog 系统级
+    处理（自动 cancel → OnCancelListener），不经过本函数；仅当
+    返回键事件仍漏到 Kivy 层时由此兜底：
     网页有后退历史（如登录页→验证页）则 webView.goBack()；
     无历史则关闭登录层返回 App（等价 ✕ 返回首页）。
 

@@ -64,7 +64,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.8.2-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.8.3-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -77,12 +77,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.2 根治版）。' '经源码级联网调研定位 v1.8.1 修复无效的真正根因，本次根治：①"点卡片跳到下载网盘APP界面"——WebView 未设 WebViewClient，页面 intent://market:// 跳转全部逃逸到系统应用市场；现已装导航守卫（Java 桥接类）只放行 http/https，百度改用 PC 版统一登录页 passport.baidu.com（原入口有 100ms 延迟强制跳转脚本）。' '②"登录页无法返回、返回手势无效"——三层修复：SDL 返回键 trap（此前返回键根本不产生键盘事件）+ WebView 层返回键拦截（网页可后退先后退，再按关闭登录层）+ 顶部 ✕ 返回首页 / ✓ 完成登录 双按钮。' 'v1.8.0 功能全量包含：分享链接直接下载（蓝奏云/123云盘免登录，夸克网盘需先登录），多文件分享自动批量下载、支持提取码（链接后加 ?code=xxxx）。' '首页 18 家国内外网盘入口，登录 Cookie 永久保存、下载自动携带；前台服务保活锁屏不断流。' '异常请取应用目录 crash-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v1.8.2"
+          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.3 系统级根治版）。' '真机反馈 v1.8.2 后百度已正常，但其他网盘仍跳"下载网盘APP"界面、手势返回仍无效——抓 SDL 官方源码定位真正根由后本次系统级根治：' '①"手势/返回键无法关闭登录页"——Android 10+ 手势导航的返回手势不产生键盘事件，直接调 Activity.onBackPressed()；SDL 源码里 trap 开启时该函数直接 return（手势被吞，什么都不发生），此前三层键盘拦截全部收不到手势。本次把登录层改为全屏 Dialog 承载：手势/返回键自动取消 Dialog（Android 系统标准行为），不再依赖任何键盘事件，这是唯一系统级可靠路径。' '②"其他网盘仍跳下载App界面"——导航拦截器 shouldOverrideUrlLoading 对服务端 302 重定向无效（Android 官方文档明确），网盘 H5 壳"跳下载App"很多正是 302 落地。本次在 onPageStarted（一切导航必经点，含 302 落地）加装守卫：应用市场类 URL（market://、各应用商店）命中即停止加载，并记录完整导航日志（登录结束后落 nav-*.log，可取回诊断"到底跳去了哪"）。' '百度修复（v1.8.2）、PC 版登录页、桌面 UA、导航守卫等此前修复全部保留。' 'v1.8.0 功能全量包含：分享链接直接下载（蓝奏云/123云盘免登录，夸克网盘需先登录），多文件分享自动批量下载、支持提取码（链接后加 ?code=xxxx）。首页 18 家国内外网盘入口，登录 Cookie 永久保存、下载自动携带；前台服务保活锁屏不断流。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v1.8.3"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.2" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.3" --latest --notes-file "$NOTES_FILE"
           fi
 '''
 

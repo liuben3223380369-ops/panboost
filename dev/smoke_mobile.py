@@ -291,7 +291,7 @@ def main():
     check("壳-非返回键不拦截",
           app._on_key(None, 13) is False)
 
-    # ---- v1.8.2 导航守卫 + WebView 返回键 + SDL trap ----
+    # ---- v1.8.2 导航守卫 + WebView 返回键（v1.8.3 起 SDL trap 移除）----
     check("壳-导航白名单_decide_url行为",
           _wl._decide_url("https://pan.baidu.com/") == (False, None)
           and _wl._decide_url("http://x/") == (False, None)
@@ -322,13 +322,34 @@ def main():
           and "extends WebViewClient" in java_path.read_text(encoding="utf-8")
           and java_path.read_text(encoding="utf-8").count(
               "shouldOverrideUrlLoading") >= 2)
-    check("壳-SDL返回键trap已开启",
-          os.environ.get("SDL_ANDROID_TRAP_BACK_BUTTON") == "1")
+    check("壳-SDL返回键trap已移除（v1.8.3：吞手势返回）",
+          'os.environ.setdefault("SDL_ANDROID_TRAP' not in py_src)
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本1.8.2",
-          mobile_main.SHELL_VERSION == "1.8.2", mobile_main.SHELL_VERSION)
+    check("壳-壳版本1.8.3",
+          mobile_main.SHELL_VERSION == "1.8.3", mobile_main.SHELL_VERSION)
+
+    # ---- v1.8.3 Dialog 承载 + onPageStarted 导航观测 ----
+    check("壳-登录层全屏Dialog承载（手势返回系统级）",
+          "android.app.Dialog" in wsrc
+          and "setOnCancelListener" in wsrc
+          and "setCancelable(True)" in wsrc
+          and "_CancelListener" in wsrc
+          and "DialogInterface$OnCancelListener" in wsrc
+          and "dialog.dismiss()" in wsrc)
+    check("壳-onPageStarted导航观测已接入",
+          "onPageStarted" in wsrc and "onPageFinished" in wsrc
+          and "stopLoading" in wsrc
+          and "onPageStarted" in java_path.read_text(encoding="utf-8"),
+          "302 落地守卫 + 导航日志")
+    check("壳-市场URL黑名单命中正确",
+          "market://details?id=x".startswith(_wl.MARKET_PREFIXES)
+          and "https://play.google.com/store/apps?id=x".startswith(
+              _wl.MARKET_PREFIXES)
+          and "https://appgallery.huawei.com/x".startswith(
+              _wl.MARKET_PREFIXES)
+          and not "https://pan.baidu.com/".startswith(_wl.MARKET_PREFIXES))
 
     # ---- 首页宫格 ----
     grid = app._scr("home").ids.pan_grid
@@ -371,6 +392,28 @@ def main():
     app.del_account("baidu")
     check("壳-删除登录双清", "baidu" not in mobile_main.load_accounts()
           and "baidu.com" not in pb.load_cookie_store())
+
+    # v1.8.3 导航日志落盘：onPageStarted 记录 → 登录结束 nav-*.log
+    _wl._STATE["nav_log"].clear()
+    _wl._STATE["nav_log"].append(
+        ("start", "08:00:00", "https://pan.quark.cn/"))
+    _wl._STATE["nav_log"].append(
+        ("block", "08:00:01", "市场URL已拦截: market://details?id=x"))
+    mobile_main.weblogin.available = lambda: True
+    orig_open = mobile_main.weblogin.open_login
+    mobile_main.weblogin.open_login = (
+        lambda url, keys, on_done, title="", on_cancel=None:
+        on_done("BDUSS=fake456", True))
+    app.pan_login("baidu")
+    mobile_main.weblogin.open_login = orig_open
+    navs = sorted(Path(tmp).glob("nav-baidu-*.log"))
+    nav_txt = navs[-1].read_text(encoding="utf-8") if navs else ""
+    check("壳-导航日志落盘nav文件可取回诊断",
+          bool(navs) and "market://details?id=x" in nav_txt
+          and "pan.quark.cn" in nav_txt, f"{len(navs)} 份")
+    check("壳-nav_log导出函数行为",
+          hasattr(_wl, "nav_log") and len(_wl.nav_log()) == 2,
+          f"{len(_wl.nav_log())} 条")
 
     # WebView 打开失败（真机 v1.7.0"卡片点击无反应"事故路径）→
     # 必须抛回调用方并回落账号屏手动路径，绝不静默；

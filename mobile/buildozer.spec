@@ -6,13 +6,15 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 1.8.2
+version = 1.8.3
 
 requirements = python3,kivy,certifi,pyjnius
 
-# v1.8.2 WebView 导航守卫：Java 桥接类（pyjnius 只能实现接口，
-# 不能继承 WebViewClient 抽象类）——拦截 intent://market:// 等一切
-# 非 http/https 导航（真机"跳到下载网盘APP界面"根因）
+# v1.8.2 导航守卫 + v1.8.3 onPageStarted 导航观测：Java 桥接类
+# （pyjnius 只能实现接口，不能继承 WebViewClient 抽象类）——
+# shouldOverrideUrlLoading 拦截 intent://market:// 等一切非
+# http/https 导航；onPageStarted 拦截 302 落地的应用市场页
+# （前者对服务端 302 重定向无效，Android 官方文档明确）
 android.add_src = java_classes/PanWebViewClient.java
 
 # 固定 p4a 到稳定 release（hostpython 3.11.5）；master 的 hostpython
