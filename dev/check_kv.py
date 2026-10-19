@@ -116,14 +116,17 @@ def main():
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
     # 无 client 时 intent://market:// 导航逃逸到系统；百度 H5 壳有
     # 100ms 延迟强制跳转脚本）
-    java_path = ROOT / "mobile" / "java_classes" / "PanWebViewClient.java"
+    # 注：ROOT 是 str（os.path.dirname），拼路径必须 Path(ROOT)
+    java_path = Path(ROOT) / "mobile" / "java_classes" \
+        / "PanWebViewClient.java"
     assert java_path.exists(), "缺 Java 桥接类 PanWebViewClient.java"
     jtxt = java_path.read_text(encoding="utf-8")
     assert "extends WebViewClient" in jtxt, "桥接类未继承 WebViewClient"
     assert jtxt.count("shouldOverrideUrlLoading") >= 2, \
         "桥接类未覆写双签名 shouldOverrideUrlLoading"
     assert "UrlLoadingCallback" in jtxt, "桥接类缺回调接口"
-    spec = (ROOT / "mobile" / "buildozer.spec").read_text(encoding="utf-8")
+    spec = (Path(ROOT) / "mobile" / "buildozer.spec").read_text(
+        encoding="utf-8")
     assert "android.add_src" in spec and "PanWebViewClient.java" in spec, \
         "spec 未把 Java 桥接类编入 APK（android.add_src）"
     assert "setWebViewClient" in wsrc, "未设置 WebViewClient（导航逃逸根因）"
