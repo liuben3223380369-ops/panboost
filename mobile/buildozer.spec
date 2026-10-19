@@ -6,7 +6,7 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 1.6.3
+version = 1.7.0
 
 requirements = python3,kivy,certifi,pyjnius
 
@@ -21,8 +21,13 @@ android.api = 33
 android.minapi = 24
 android.archs = arm64-v8a
 
-android.permissions = INTERNET
+# INTERNET 网络；WAKE_LOCK 锁屏保活；FOREGROUND_SERVICE+POST_NOTIFICATIONS
+# 前台服务常驻通知（Android 12+ 后台冻结防护，下载不断流）
+android.permissions = INTERNET,WAKE_LOCK,FOREGROUND_SERVICE,POST_NOTIFICATIONS
 android.allow_backup = True
+
+# 下载前台服务：保活心跳（下载线程在主进程，引擎实时落盘）
+services = Download:service_down.py:foreground
 
 # 日志输出到 logcat（adb logcat -s python）
 android.logcat = True

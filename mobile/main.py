@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.6.3。
+"""PanBoost Android 图形壳（Kivy）v1.7.0。
 
-三屏界面：
-  下载 —— URL/线程/进度/日志（引擎反风控全量生效）
-  账号 —— 网盘 Cookie 按域名持久化，下载时自动匹配携带
-  历史 —— 下载记录永久保存（可开关/清空/点击重跑）
+v1.7.0：浅色 UI 全面重设计 + 首页网盘登录入口。
 
-字体：fonts/cjk.ttf（Noto Sans SC 子集，21985 字符）重注册为 Kivy
-默认字体 Roboto——修复默认字体无 CJK 字形导致的中文方块乱码。
+- 浅色主题：白卡片 / 主蓝 / 深字（弃用 Kivy 默认黑底）
+- 首页网盘宫格：18 家国内外网盘（百度/夸克/阿里/微云/天翼/移动/迅雷/
+  123/蓝奏/坚果/UC/Google Drive/Dropbox/OneDrive/MEGA/pCloud/Box/Yandex）
+- 点击入口 → 原生 WebView 打开网盘官方登录页（验证码/扫码原生支持），
+  登录后自动提取 Cookie 永久保存（下载对应网盘文件时自动携带）
+- 下载保活：前台服务 + WakeLock（Android 12+ 锁屏/后台不断流）
+- 四屏：首页（宫格）/ 下载（直链+Cookie+线程至1024）/ 账号 / 历史
 
-v1.6.3：线程选项补全至 1024（引擎 MAX_THREADS=1024；建议仅对大文件
-且服务器允许时使用超高并发，引擎会平滑爬坡并自动 AIMD 降速），
-下拉列表改紧凑行高适配小屏。
-
-v1.6.2：修复 v1.6.1 启动闪退——KV 引用的 MainScreen/AccountsScreen/
-HistoryScreen 此前未在 Python 定义，Kivy Builder 实例化时抛
-FactoryException 导致打开即崩。自定义屏必须先在 Python 定义（Widget
-元类会自动注册进 Kivy Factory）。另增崩溃日志兜底：任何未捕获异常
-写入下载目录 crash-*.log，可用文件管理器取回诊断。
+v1.6.3：线程选项补全至 1024；v1.6.2：修复启动闪退（KV 自定义类必须
+先在 Python 定义，Widget 元类才注册进 Factory）；v1.6.1：中文字体。
 """
 import json
 import os
@@ -37,8 +32,22 @@ if IS_ANDROID:
 
 sys.path.insert(0, str(Path(__file__).parent))
 import panboost as pb  # noqa: E402
+import weblogin  # noqa: E402
 
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
+ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
+
+SHELL_VERSION = "1.7.0"
+
+# ---------------- 浅色主题色板 ----------------
+BG = (0.957, 0.965, 0.984, 1)          # 页面底 #F4F6FB
+CARD = (1.0, 1.0, 1.0, 1.0)            # 卡片白
+CARD_DOWN = (0.906, 0.925, 0.969, 1)   # 卡片按压
+PRIMARY = (0.145, 0.388, 0.922, 1)     # 主蓝 #2563EB
+PRIMARY_DARK = (0.118, 0.298, 0.761, 1)
+INK = (0.118, 0.161, 0.231, 1)         # 主文字 #1E293B
+SUB = (0.396, 0.447, 0.533, 1)         # 次文字 #64748B
+GREEN = (0.086, 0.639, 0.290, 1)       # 已登录 #16A34A
 
 
 def register_font():
@@ -60,17 +69,70 @@ from kivy.app import App  # noqa: E402
 from kivy.clock import Clock  # noqa: E402
 from kivy.lang import Builder  # noqa: E402
 from kivy.metrics import dp, sp  # noqa: E402
+from kivy.properties import ListProperty  # noqa: E402
 from kivy.uix.button import Button  # noqa: E402
 from kivy.uix.label import Label  # noqa: E402
 from kivy.uix.screenmanager import Screen  # noqa: E402
 from kivy.uix.spinner import SpinnerOption  # noqa: E402
 
-SHELL_VERSION = "1.6.3"
+
+# ---------------- 网盘清单（首页宫格） ----------------
+# auth_keys: 登录成功特征 Cookie 键，命中自动完成；空 = 依赖用户点
+#            "完成登录"按钮返回
+# domains:   Cookie 生效域（写入引擎 cookie store，下载时后缀匹配）
+PANS = [
+    {"key": "baidu", "name": "百度网盘", "login": "https://pan.baidu.com/",
+     "domains": ["baidu.com"], "auth_keys": ["BDUSS"]},
+    {"key": "quark", "name": "夸克网盘", "login": "https://pan.quark.cn/",
+     "domains": ["quark.cn"], "auth_keys": ["__puus"]},
+    {"key": "alipan", "name": "阿里云盘", "login": "https://www.alipan.com/",
+     "domains": ["alipan.com", "aliyundrive.com"], "auth_keys": []},
+    {"key": "weiyun", "name": "腾讯微云", "login": "https://www.weiyun.com/",
+     "domains": ["weiyun.com"], "auth_keys": []},
+    {"key": "tianyi", "name": "天翼云盘", "login": "https://cloud.189.cn/",
+     "domains": ["189.cn"], "auth_keys": []},
+    {"key": "yidong", "name": "移动云盘",
+     "login": "https://caiyun.feixin.10086.cn/",
+     "domains": ["10086.cn"], "auth_keys": []},
+    {"key": "xunlei", "name": "迅雷云盘", "login": "https://pan.xunlei.com/",
+     "domains": ["xunlei.com"], "auth_keys": []},
+    {"key": "pan123", "name": "123云盘", "login": "https://www.123pan.com/",
+     "domains": ["123pan.com"], "auth_keys": []},
+    {"key": "lanzou", "name": "蓝奏云", "login": "https://www.lanzou.com/",
+     "domains": ["lanzou.com", "lanzoux.com"], "auth_keys": []},
+    {"key": "jianguo", "name": "坚果云", "login": "https://www.jianguoyun.com/",
+     "domains": ["jianguoyun.com"], "auth_keys": []},
+    {"key": "uc", "name": "UC网盘", "login": "https://drive.uc.cn/",
+     "domains": ["uc.cn"], "auth_keys": []},
+    {"key": "gdrive", "name": "Google Drive",
+     "login": "https://accounts.google.com/",
+     "domains": ["google.com", "googleusercontent.com"],
+     "auth_keys": ["SAPISID"]},
+    {"key": "dropbox", "name": "Dropbox", "login": "https://www.dropbox.com/",
+     "domains": ["dropbox.com", "dropboxusercontent.com"],
+     "auth_keys": []},
+    {"key": "onedrive", "name": "OneDrive",
+     "login": "https://login.live.com/",
+     "domains": ["live.com", "1drv.com", "sharepoint.com"],
+     "auth_keys": []},
+    {"key": "mega", "name": "MEGA", "login": "https://mega.nz/",
+     "domains": ["mega.nz"], "auth_keys": []},
+    {"key": "pcloud", "name": "pCloud", "login": "https://www.pcloud.com/",
+     "domains": ["pcloud.com"], "auth_keys": []},
+    {"key": "box", "name": "Box", "login": "https://www.box.com/",
+     "domains": ["box.com", "boxcloud.com"], "auth_keys": []},
+    {"key": "yandex", "name": "Yandex Disk", "login": "https://disk.yandex.com/",
+     "domains": ["yandex.com", "yandex.ru"], "auth_keys": []},
+]
+PAN_BY_KEY = {p["key"]: p for p in PANS}
 
 
 class MainScreen(Screen):
-    """KV 规则引用的自定义屏必须在 Python 定义，否则
-    Builder 抛 FactoryException、App 启动即闪退（v1.6.1 事故根因）。"""
+    """首页：网盘宫格。KV 自定义类必须先在 Python 定义（v1.6.1 事故）。"""
+
+
+class DownloadScreen(Screen):
+    pass
 
 
 class AccountsScreen(Screen):
@@ -81,12 +143,18 @@ class HistoryScreen(Screen):
     pass
 
 
+class CardButton(Button):
+    """白卡片按钮：圆角视觉全部在 KV 规则实现，Python 只声明属性
+    （mock 环境下 import 零副作用）。"""
+    bg = ListProperty(CARD)
+    bg_down = ListProperty(CARD_DOWN)
+
+
 class CompactOption(SpinnerOption):
     """紧凑下拉行（30dp）：9 个线程选项在小屏上不截断。
 
-    注意：KV 属性值位置（如 option_cls:）是表达式求值上下文，
-    类名必须经 app 属性传入，动态类 @ 语法在此不可见（v1.6.3 CI
-    门禁抓到的问题）。"""
+    注意：KV 属性值位置（如 option_cls:）是表达式求值上下文，类名
+    必须经 app 属性传入（v1.6.3 CI 门禁抓到的问题）。"""
     pass
 
 
@@ -123,7 +191,7 @@ def _install_crash_logger():
 
     sys.excepthook = _hook
     try:
-        from kivy.base import ExceptionHandler, ExceptionManager
+        from kivy.base import ExceptionManager, ExceptionHandler
 
         class _CrashHandler(ExceptionHandler):
             def handle_exception(self, e):
@@ -136,6 +204,112 @@ def _install_crash_logger():
 
 
 _install_crash_logger()
+
+
+# ---------------- 下载保活（前台服务 + WakeLock） ----------------
+
+_KEEPALIVE = {"svc": None, "wl": None}
+
+
+def start_keepalive():
+    """下载开始：起前台服务 + 持 PARTIAL_WAKE_LOCK。
+
+    Android 12+ 对后台应用冻结，前台服务是唯一可靠保活手段；
+    任何一步失败静默降级（下载仍靠引擎实时落盘保证）。"""
+    if not IS_ANDROID:
+        return False
+    ok = False
+    try:
+        from android import AndroidService
+        _KEEPALIVE["svc"] = AndroidService(
+            "PanBoost 下载中", "多线程下载进行中，进度实时保存")
+        _KEEPALIVE["svc"].start("")
+        ok = True
+    except Exception:
+        _KEEPALIVE["svc"] = None
+    try:
+        from jnius import autoclass
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Context = autoclass("android.content.Context")
+        PowerManager = autoclass("android.os.PowerManager")
+        pm = PythonActivity.mActivity.getSystemService(Context.POWER_SERVICE)
+        wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PanBoost:dl")
+        wl.acquire()
+        _KEEPALIVE["wl"] = wl
+        ok = True
+    except Exception:
+        _KEEPALIVE["wl"] = None
+    return ok
+
+
+def stop_keepalive():
+    """下载结束：停服务、释放 WakeLock（必须释放防耗电）。"""
+    try:
+        if _KEEPALIVE["svc"] is not None:
+            _KEEPALIVE["svc"].stop()
+    except Exception:
+        pass
+    _KEEPALIVE["svc"] = None
+    try:
+        if _KEEPALIVE["wl"] is not None:
+            _KEEPALIVE["wl"].release()
+    except Exception:
+        pass
+    _KEEPALIVE["wl"] = None
+
+
+# ---------------- 账簿（登录网盘永久记录） ----------------
+
+def load_accounts():
+    try:
+        d = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
+        if isinstance(d, dict):
+            return d
+    except Exception:
+        pass
+    return {}
+
+
+def save_accounts(acc):
+    try:
+        pb.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = str(ACCOUNTS_FILE) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(acc, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, ACCOUNTS_FILE)
+    except Exception:
+        pass
+
+
+def record_login(pan_key, cookie, auto):
+    """登录成功：写账簿 + 同步引擎 cookie store（下载自动匹配）。"""
+    pan = PAN_BY_KEY.get(pan_key)
+    if pan is None or not cookie:
+        return False
+    acc = load_accounts()
+    acc[pan_key] = {"name": pan["name"], "ts": int(time.time()),
+                    "auto": bool(auto), "len": len(cookie)}
+    save_accounts(acc)
+    store = pb.load_cookie_store()
+    for domain in pan["domains"]:
+        store[domain] = cookie
+    pb.save_cookie_store(store)
+    return True
+
+
+def remove_login(pan_key):
+    """删除登录：账簿 + 引擎 cookie store 同步清理。"""
+    pan = PAN_BY_KEY.get(pan_key)
+    acc = load_accounts()
+    if pan_key not in acc and pan is None:
+        return False
+    acc.pop(pan_key, None)
+    save_accounts(acc)
+    store = pb.load_cookie_store()
+    for domain in (pan["domains"] if pan else []):
+        store.pop(domain, None)
+    pb.save_cookie_store(store)
+    return True
 
 
 def _safe_name(name, url):
@@ -179,28 +353,117 @@ def add_history(entry):
 
 
 KV = """
+<CardButton>:
+    background_normal: ''
+    background_down: ''
+    background_color: 0, 0, 0, 0
+    canvas.before:
+        Color:
+            rgba: self.bg_down if self.state == 'down' else self.bg
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(9)]
+    color: 0.118, 0.161, 0.231, 1
+
 <CompactOption>:
     height: dp(30)
     font_size: sp(12)
+    background_normal: ''
+    background_down: ''
+    background_color: 0.145, 0.388, 0.922, 1 if self.state == 'down' else 0.96
+    color: 1, 1, 1, 1
 
 ScreenManager:
     MainScreen:
+    DownloadScreen:
     AccountsScreen:
     HistoryScreen:
 
 <MainScreen>:
-    name: 'main'
+    name: 'home'
     BoxLayout:
         orientation: 'vertical'
-        padding: dp(10)
-        spacing: dp(6)
+        padding: dp(14)
+        spacing: dp(8)
+        canvas.before:
+            Color:
+                rgba: 0.957, 0.965, 0.984, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
 
         Label:
-            text: 'PanBoost v' + app.shell_version
-            font_size: sp(19)
+            text: 'PanBoost'
+            font_size: sp(24)
             bold: True
+            color: 0.118, 0.161, 0.231, 1
             size_hint_y: None
-            height: dp(26)
+            height: dp(30)
+
+        Label:
+            text: '点击网盘卡片登录（Cookie 永久保存，下载自动携带）'
+            font_size: sp(12)
+            color: 0.396, 0.447, 0.533, 1
+            size_hint_y: None
+            height: dp(18)
+
+        ScrollView:
+            GridLayout:
+                id: pan_grid
+                cols: 3
+                size_hint_y: None
+                height: self.minimum_height
+                padding: dp(2), dp(2)
+                spacing: dp(8)
+
+        CardButton:
+            text: '高级下载（URL 直链）'
+            font_size: sp(15)
+            bold: True
+            bg: 0.145, 0.388, 0.922, 1
+            bg_down: 0.118, 0.298, 0.761, 1
+            size_hint_y: None
+            height: dp(46)
+            color: 1, 1, 1, 1
+            on_release: app.go('download')
+
+        Label:
+            id: home_status
+            text: ''
+            font_size: sp(11)
+            color: 0.396, 0.447, 0.533, 1
+            size_hint_y: None
+            height: dp(16)
+            halign: 'left'
+
+<DownloadScreen>:
+    name: 'download'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(14)
+        spacing: dp(6)
+        canvas.before:
+            Color:
+                rgba: 0.957, 0.965, 0.984, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(34)
+            spacing: dp(8)
+            CardButton:
+                text: '首页'
+                font_size: sp(13)
+                size_hint_x: 0.3
+                on_release: app.go('home')
+            Label:
+                text: '下载'
+                font_size: sp(17)
+                bold: True
+                color: 0.118, 0.161, 0.231, 1
 
         TextInput:
             id: url_input
@@ -211,7 +474,7 @@ ScreenManager:
 
         TextInput:
             id: cookie_input
-            hint_text: '本次 Cookie（可选，留空自动匹配已存账号）'
+            hint_text: '本次 Cookie（可选，留空自动匹配已登录网盘）'
             multiline: False
             size_hint_y: None
             height: dp(40)
@@ -222,9 +485,9 @@ ScreenManager:
             spacing: dp(6)
             Label:
                 text: '线程:'
+                color: 0.118, 0.161, 0.231, 1
                 size_hint_x: None
                 width: dp(44)
-                halign: 'right'
             Spinner:
                 id: threads_spinner
                 text: 'auto'
@@ -238,13 +501,18 @@ ScreenManager:
             Label:
                 text: '跳过证书校验'
                 font_size: sp(11)
+                color: 0.396, 0.447, 0.533, 1
                 halign: 'left'
                 text_size: self.size
 
-        Button:
+        CardButton:
             id: go_btn
             text: '开始下载'
             bold: True
+            font_size: sp(15)
+            bg: 0.145, 0.388, 0.922, 1
+            bg_down: 0.118, 0.298, 0.761, 1
+            color: 1, 1, 1, 1
             size_hint_y: None
             height: dp(46)
             on_release: app.on_go()
@@ -254,12 +522,13 @@ ScreenManager:
             max: 1.0
             value: 0
             size_hint_y: None
-            height: dp(16)
+            height: dp(14)
 
         Label:
             id: status_lbl
             text: '待命。目录: ' + app.dir_short
             font_size: sp(12)
+            color: 0.396, 0.447, 0.533, 1
             size_hint_y: None
             height: dp(34)
             halign: 'left'
@@ -269,12 +538,14 @@ ScreenManager:
         BoxLayout:
             size_hint_y: None
             height: dp(38)
-            spacing: dp(6)
-            Button:
-                text: '账号管理'
+            spacing: dp(8)
+            CardButton:
+                text: '我的账号'
+                font_size: sp(13)
                 on_release: app.go('accounts')
-            Button:
+            CardButton:
                 text: '下载历史'
+                font_size: sp(13)
                 on_release: app.go('history')
 
         ScrollView:
@@ -282,6 +553,7 @@ ScreenManager:
                 id: log_lbl
                 text: ''
                 font_size: sp(11)
+                color: 0.396, 0.447, 0.533, 1
                 size_hint_y: None
                 height: max(self.texture_size[1], dp(24))
                 text_size: (self.width - dp(6), None)
@@ -291,80 +563,107 @@ ScreenManager:
     name: 'accounts'
     BoxLayout:
         orientation: 'vertical'
-        padding: dp(10)
+        padding: dp(14)
         spacing: dp(6)
+        canvas.before:
+            Color:
+                rgba: 0.957, 0.965, 0.984, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
 
-        Label:
-            text: '网盘账号（Cookie 持久化）'
-            font_size: sp(17)
-            bold: True
+        BoxLayout:
             size_hint_y: None
-            height: dp(24)
+            height: dp(34)
+            spacing: dp(8)
+            CardButton:
+                text: '首页'
+                font_size: sp(13)
+                size_hint_x: 0.3
+                on_release: app.go('home')
+            Label:
+                text: '我的账号'
+                font_size: sp(17)
+                bold: True
+                color: 0.118, 0.161, 0.231, 1
 
         Label:
-            text: '先在浏览器登录网盘，F12 开发者工具复制请求里的 Cookie 粘贴到这里（按域名保存）。下载该域名文件时自动携带，永久保存。点击列表条目可删除。'
+            text: '已登录网盘永久记录在此。新登录请回首页点网盘卡片；也可手动粘贴任意站点 Cookie。点击条目删除。'
             font_size: sp(11)
+            color: 0.396, 0.447, 0.533, 1
             size_hint_y: None
-            height: dp(58)
+            height: dp(42)
             text_size: self.size
             halign: 'left'
 
         TextInput:
             id: domain_input
-            hint_text: '网盘域名，如 pan.baidu.com'
+            hint_text: '手动添加：域名，如 pan.baidu.com'
             multiline: False
             size_hint_y: None
-            height: dp(40)
+            height: dp(38)
 
         TextInput:
             id: cookie_input
             hint_text: 'Cookie 值，如 BDUSS=xxx; STK=yyy'
             multiline: True
             size_hint_y: None
-            height: dp(64)
+            height: dp(60)
 
-        Button:
-            text: '保存账号'
+        CardButton:
+            text: '保存'
             bold: True
+            font_size: sp(14)
+            bg: 0.145, 0.388, 0.922, 1
+            bg_down: 0.118, 0.298, 0.761, 1
+            color: 1, 1, 1, 1
             size_hint_y: None
-            height: dp(42)
+            height: dp(40)
             on_release: app.save_account()
 
         Label:
             id: accounts_status
             text: ''
             font_size: sp(11)
+            color: 0.396, 0.447, 0.533, 1
             size_hint_y: None
-            height: dp(20)
+            height: dp(18)
 
         ScrollView:
-            BoxLayout:
+            GridLayout:
                 id: accounts_box
-                orientation: 'vertical'
+                cols: 1
                 size_hint_y: None
                 height: self.minimum_height
                 spacing: dp(4)
-
-        Button:
-            text: '返回'
-            size_hint_y: None
-            height: dp(40)
-            on_release: app.go('main')
 
 <HistoryScreen>:
     name: 'history'
     BoxLayout:
         orientation: 'vertical'
-        padding: dp(10)
+        padding: dp(14)
         spacing: dp(6)
+        canvas.before:
+            Color:
+                rgba: 0.957, 0.965, 0.984, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
 
         BoxLayout:
             size_hint_y: None
-            height: dp(30)
+            height: dp(34)
+            spacing: dp(8)
+            CardButton:
+                text: '首页'
+                font_size: sp(13)
+                size_hint_x: 0.3
+                on_release: app.go('home')
             Label:
                 text: '下载历史（永久记录）'
                 font_size: sp(16)
                 bold: True
+                color: 0.118, 0.161, 0.231, 1
             Switch:
                 id: rec_switch
                 size_hint_x: None
@@ -373,19 +672,21 @@ ScreenManager:
 
         BoxLayout:
             size_hint_y: None
-            height: dp(36)
-            spacing: dp(6)
-            Button:
+            height: dp(38)
+            spacing: dp(8)
+            CardButton:
                 text: '清空历史'
+                font_size: sp(13)
                 on_release: app.clear_history()
-            Button:
+            CardButton:
                 text: '返回'
-                on_release: app.go('main')
+                font_size: sp(13)
+                on_release: app.go('home')
 
         ScrollView:
-            BoxLayout:
+            GridLayout:
                 id: history_box
-                orientation: 'vertical'
+                cols: 1
                 size_hint_y: None
                 height: self.minimum_height
                 spacing: dp(4)
@@ -395,6 +696,8 @@ ScreenManager:
 class PanBoostApp(App):
     title = "PanBoost"
     compact_option = CompactOption
+    COLOR_BG = BG
+    COLOR_CARD = CARD
 
     def build(self):
         self.shell_version = SHELL_VERSION
@@ -408,6 +711,7 @@ class PanBoostApp(App):
         self.dir_short = external_files_dir()
         self.root = Builder.load_string(KV)
         Clock.schedule_interval(self._tick, 0.5)
+        self._build_pan_grid()
         self._load_settings()
         return self.root
 
@@ -436,7 +740,71 @@ class PanBoostApp(App):
         h["enabled"] = bool(active)
         save_history(h)
 
-    # ---------- 账号（Cookie 持久化） ----------
+    # ---------- 首页网盘宫格 ----------
+
+    def _build_pan_grid(self):
+        grid = self._scr("home").ids.pan_grid
+        grid.clear_widgets()
+        acc = load_accounts()
+        for pan in PANS:
+            logged = pan["key"] in acc
+            if logged:
+                txt = f"{pan['name']}\n[b][color=#16a34a]已登录[/color][/b]"
+            else:
+                txt = f"{pan['name']}\n[sub]{pan['domains'][0]}[/sub]"
+            btn = CardButton(
+                text=txt, markup=True, font_size=sp(13),
+                size_hint_y=None, height=dp(84),
+                halign="center", valign="middle")
+            btn.bind(on_release=lambda _b, k=pan["key"]: self.pan_login(k))
+            grid.add_widget(btn)
+
+    def _home_status(self, msg):
+        try:
+            self._scr("home").ids.home_status.text = msg
+        except Exception:
+            pass
+
+    def pan_login(self, pan_key):
+        """点击网盘卡片：WebView 登录（Android）或手动粘贴回退。"""
+        pan = PAN_BY_KEY.get(pan_key)
+        if pan is None:
+            return
+        if self.worker is not None and self.worker.is_alive():
+            self._home_status("下载进行中，请等待完成后再登录")
+            return
+        if weblogin.available():
+            def on_done(cookie, auto):
+                self._after_login(pan_key, cookie, auto)
+            try:
+                weblogin.open_login(pan["login"], pan["auth_keys"],
+                                    on_done, title=pan["name"])
+                self._home_status(
+                    f"已打开 {pan['name']} 登录页——完成登录后自动返回"
+                    + ("（检测到登录将自动保存）" if pan["auth_keys"]
+                       else "（登录后请点顶部按钮返回）"))
+                return
+            except Exception as e:
+                self._home_status(f"登录窗口打开失败（{e}），请手动添加 Cookie")
+        # 回退：跳账号屏手动粘贴（预填域名）
+        acc = self._scr("accounts").ids
+        acc.domain_input.text = pan["domains"][0]
+        acc.accounts_status.text = (
+            f"请在浏览器登录 {pan['name']}，复制 Cookie 粘贴到此处保存")
+        self.go("accounts")
+
+    def _after_login(self, pan_key, cookie, auto):
+        pan = PAN_BY_KEY.get(pan_key)
+        if record_login(pan_key, cookie, auto):
+            self._build_pan_grid()
+            when = "自动检测" if auto else "手动确认"
+            self._home_status(
+                f"{pan['name']} 已登录（{when}，Cookie 已永久保存）")
+        else:
+            self._home_status(
+                f"未捕获到 {pan['name']} 的 Cookie——请确认已完成登录后重试")
+
+    # ---------- 账号管理 ----------
 
     def save_account(self):
         ids = self._scr("accounts").ids
@@ -454,28 +822,45 @@ class PanBoostApp(App):
         st.text = f"已保存 {domain}（下载时自动匹配携带）"
         self.refresh_accounts()
 
-    def del_account(self, domain):
-        store = pb.load_cookie_store()
-        store.pop(domain, None)
-        pb.save_cookie_store(store)
-        self._scr("accounts").ids.accounts_status.text = f"已删除 {domain}"
-        self.refresh_accounts()
-
     def refresh_accounts(self):
         box = self._scr("accounts").ids.accounts_box
         box.clear_widgets()
-        store = pb.load_cookie_store()
-        if not store:
+        rows = []
+        for k, v in load_accounts().items():
+            pan = PAN_BY_KEY.get(k, {})
+            name = (v.get("name") if isinstance(v, dict) else None) \
+                or pan.get("name") or k
+            ts = v.get("ts", 0) if isinstance(v, dict) else 0
+            rows.append((name, "已登录网盘 · "
+                        + time.strftime("%Y-%m-%d", time.localtime(ts)), k))
+        for domain, cookie in sorted(pb.load_cookie_store().items()):
+            if any(domain in p["domains"] for p in PANS):
+                continue  # 账簿已含
+            rows.append((domain, f"手动添加 · {cookie[:28]}…", domain))
+        if not rows:
             box.add_widget(Label(
-                text="暂无账号。保存第一个网盘 Cookie 后，下载对应域名文件时将自动携带。",
-                font_size=sp(11), size_hint_y=None, height=dp(40)))
+                text="暂无账号。回首页点网盘卡片登录，或手动粘贴 Cookie。",
+                font_size=sp(11), color=SUB,
+                size_hint_y=None, height=dp(40)))
             return
-        for domain, cookie in sorted(store.items()):
-            show = f"{domain}    {cookie[:36]}{'…' if len(cookie) > 36 else ''}"
-            btn = Button(text=show, font_size=sp(11), size_hint_y=None,
-                         height=dp(34),
-                         on_release=lambda _b, d=domain: self.del_account(d))
+        for title, sub, key in rows:
+            btn = CardButton(
+                text=f"{title}\n[sub]{sub}[/sub]", markup=True,
+                font_size=sp(12), size_hint_y=None, height=dp(52),
+                halign="left", valign="middle")
+            btn.bind(on_release=lambda _b, k=key: self.del_account(k))
             box.add_widget(btn)
+
+    def del_account(self, key):
+        if key in PAN_BY_KEY:
+            remove_login(key)
+        else:
+            store = pb.load_cookie_store()
+            store.pop(key, None)
+            pb.save_cookie_store(store)
+        self._scr("accounts").ids.accounts_status.text = f"已删除 {key}"
+        self.refresh_accounts()
+        self._build_pan_grid()
 
     # ---------- 历史 ----------
 
@@ -485,8 +870,8 @@ class PanBoostApp(App):
         items = load_history().get("items", [])
         if not items:
             box.add_widget(Label(text="暂无下载记录",
-                                 font_size=sp(12), size_hint_y=None,
-                                 height=dp(30)))
+                                 font_size=sp(12), color=SUB,
+                                 size_hint_y=None, height=dp(30)))
             return
         for it in items:
             ts = time.strftime("%m-%d %H:%M", time.localtime(it.get("ts", 0)))
@@ -494,17 +879,16 @@ class PanBoostApp(App):
                    f"{pb.fmt_size(it.get('size', 0))}"
                    + (f"  {pb.fmt_size(it.get('speed', 0))}/s"
                       if it.get("speed") else ""))
-            btn = Button(text=txt, font_size=sp(11), size_hint_y=None,
-                         height=dp(34), halign="left",
-                         on_release=lambda _b, u=it.get("url", ""):
-                         self.rerun(u))
+            btn = CardButton(text=txt, font_size=sp(11), size_hint_y=None,
+                             height=dp(36), halign="left")
+            btn.bind(on_release=lambda _b, u=it.get("url", ""): self.rerun(u))
             box.add_widget(btn)
 
     def rerun(self, url):
         if not url:
             return
-        self._scr("main").ids.url_input.text = url
-        self.go("main")
+        self._scr("download").ids.url_input.text = url
+        self.go("download")
         self.log(f"已预填 URL，点击开始下载即可重跑（续传）：{url[:60]}")
 
     def clear_history(self):
@@ -526,22 +910,24 @@ class PanBoostApp(App):
                 self.dl.stop_event.set()
                 self.log("已请求停止，进度将保存…")
             return
-        url = self._scr("main").ids.url_input.text.strip()
+        url = self._scr("download").ids.url_input.text.strip()
         if not url:
             self.log("请先输入下载直链 URL")
             return
-        manual_cookie = self._scr("main").ids.cookie_input.text.strip()
-        choice = self._scr("main").ids.threads_spinner.text
-        insecure = bool(self._scr("main").ids.insecure_switch.active)
+        manual_cookie = self._scr("download").ids.cookie_input.text.strip()
+        choice = self._scr("download").ids.threads_spinner.text
+        insecure = bool(self._scr("download").ids.insecure_switch.active)
         auto_cookie = pb.match_cookie_header(url) if not manual_cookie else None
         if manual_cookie:
             self.log("使用手动填写的 Cookie")
         elif auto_cookie:
-            self.log(f"自动匹配已存账号 Cookie（{auto_cookie[:40]}…）")
+            self.log(f"自动匹配已登录网盘 Cookie（{auto_cookie[:40]}…）")
         else:
             self.log("未匹配到已存账号 Cookie，匿名下载")
         self._progress = 0.0
         self._status = "探测中…"
+        if start_keepalive():
+            self.log("已开启前台保活（锁屏/后台下载不断流）")
         self.worker = threading.Thread(
             target=self._run_download,
             args=(url, manual_cookie or auto_cookie, choice, insecure),
@@ -625,7 +1011,7 @@ class PanBoostApp(App):
                 self._status = f"完成: {out.name}  {size_txt}"
                 status = "完成"
                 elapsed = max(time.time() - (self.dl.start_time
-                                             if self.dl else time.time()), 1e-6)
+                                              if self.dl else time.time()), 1e-6)
                 speed = (size or 0) / elapsed
                 self.log("下载完成")
             elif rc == 130:
@@ -644,6 +1030,7 @@ class PanBoostApp(App):
             self.log(f"{type(e).__name__}: {e}")
         finally:
             self.dl = None
+            stop_keepalive()
             if out_name:
                 add_history({"ts": int(time.time()), "url": url,
                              "name": out_name, "size": size,
@@ -652,7 +1039,7 @@ class PanBoostApp(App):
     # ---------- 主线程侧（UI 刷新） ----------
 
     def _tick(self, _dt):
-        main = self._scr("main").ids
+        dl_ids = self._scr("download").ids
         running = self.worker is not None and self.worker.is_alive()
         dl = self.dl
         if running and dl is not None and getattr(dl, "size", 0):
@@ -673,12 +1060,12 @@ class PanBoostApp(App):
             self._btn_text = "停止"
         elif not running:
             self._btn_text = "开始下载"
-        main.go_btn.text = self._btn_text
-        main.progress.value = self._progress
-        main.status_lbl.text = self._status
+        dl_ids.go_btn.text = self._btn_text
+        dl_ids.progress.value = self._progress
+        dl_ids.status_lbl.text = self._status
         if len(self.logs) != self._log_serial:
             self._log_serial = len(self.logs)
-            main.log_lbl.text = "\n".join(self.logs[-14:])
+            dl_ids.log_lbl.text = "\n".join(self.logs[-14:])
 
 
 if __name__ == "__main__":

@@ -24,7 +24,8 @@ from kivy.factory import Factory, FactoryException  # noqa: E402
 
 
 def main():
-    for cls in ("MainScreen", "AccountsScreen", "HistoryScreen"):
+    for cls in ("MainScreen", "DownloadScreen", "AccountsScreen",
+                "HistoryScreen", "CardButton", "CompactOption"):
         try:
             Factory.get(cls)
         except FactoryException:
@@ -41,12 +42,14 @@ def main():
     root = m.Builder.load_string(m.KV)
 
     names = {s.name for s in root.screens}
-    assert names == {"main", "accounts", "history"}, f"屏幕缺失: {names}"
+    assert names == {"home", "download", "accounts", "history"}, \
+        f"屏幕缺失: {names}"
 
     need = {
-        "main": {"url_input", "cookie_input", "threads_spinner",
-                 "insecure_switch", "go_btn", "progress", "status_lbl",
-                 "log_lbl"},
+        "home": {"pan_grid", "home_status"},
+        "download": {"url_input", "cookie_input", "threads_spinner",
+                     "insecure_switch", "go_btn", "progress", "status_lbl",
+                     "log_lbl"},
         "accounts": {"domain_input", "cookie_input", "accounts_status",
                      "accounts_box"},
         "history": {"history_box", "rec_switch"},
@@ -56,17 +59,27 @@ def main():
         miss = ids - got
         assert not miss, f"{scr} 屏缺少组件: {miss}"
 
-    for meth in ("on_go", "go", "save_account", "del_account",
-                 "refresh_accounts", "refresh_history", "rerun",
-                 "clear_history", "on_rec_toggle"):
-        assert hasattr(m.PanBoostApp, meth), f"缺少方法 {meth}"
+    for fn in ("on_go", "go", "pan_login", "record_login", "save_account",
+               "del_account", "refresh_accounts", "refresh_history",
+               "rerun", "clear_history", "on_rec_toggle",
+               "start_keepalive", "stop_keepalive"):
+        assert hasattr(m, fn), f"缺少函数 {fn}"
+    assert len(m.PANS) >= 18, "网盘清单不足 18 家"
 
-    spinner = root.get_screen("main").ids.threads_spinner
+    # 浅色主题断言：页面底色接近白（亮度>0.9）
+    r, g, b, _a = m.BG
+    assert r > 0.9 and g > 0.9 and b > 0.9, f"非浅色底: {m.BG}"
+    kv = m.KV
+    assert "rgba: 0.957, 0.965, 0.984, 1" in kv, "缺浅色底绘制"
+    assert "RoundedRectangle" in kv, "卡片缺圆角绘制"
+
+    spinner = root.get_screen("download").ids.threads_spinner
     from kivy.uix.spinner import SpinnerOption
     assert issubclass(spinner.option_cls, SpinnerOption), \
         f"option_cls 非法: {spinner.option_cls}"
     vals = [str(v) for v in spinner.values]
     assert "512" in vals and "1024" in vals, f"线程选项缺失: {vals}"
+
     def _walk(w):
         out = []
         for c in w.children:

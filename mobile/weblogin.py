@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Android WebView 网盘登录模块（pyjnius）。
+
+在 Kivy 界面上叠加原生 WebView 覆盖层，用户在真实网盘页面完成登录
+（含验证码/短信/扫码——浏览器引擎渲染，无需逆向任何网盘协议），
+登录后从 CookieManager 提取 Cookie 永久保存。
+
+设计要点：
+- 所有 Android UI 操作经 runOnUiThread 执行（Kivy 主线程非 UI 线程）
+- 顶部原生"完成登录"按钮兜底：特征 Cookie 未命中时用户手动返回
+- 后台线程轮询 CookieManager，特征键命中自动关闭并回调
+- 任何一步失败抛 WebLoginError，调用方回退到手动粘贴 Cookie 路径
+- 非 Android 环境下 available() 为 False，纯 Python 逻辑可 mock 测试
+"""
+import os
+import threading
+import time
+
+try:
+    from jnius import autoclass, PythonJavaClass, java_method
+    _JNIUS_OK = True
+except Exception:  # 非 Android / 无 pyjnius：占位保证类定义可加载
+    _JNIUS_OK = False
+    PythonJavaClass = object
+    autoclass = None
+
+    def java_method(*_a, **_k):
+        def deco(fn):
+            return fn
+        return deco
+
+
+class WebLoginError(Exception):
+    pass
+
+
+def available():
+    """仅在 Android（p4a 环境）且 pyjnius 可用时启用。"""
+    if not _JNIUS_OK:
+        return False
+    return ("ANDROID_PRIVATE" in os.environ
+            or "ANDROID_ARGUMENT" in os.environ)
+
+
+def _activity():
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    return PythonActivity.mActivity
+
+
+class _Runnable(PythonJavaClass):
+    __javainterfaces__ = ["java/lang/Runnable"]
+    __javacontext__ = "app"
+
+    def __init__(self, fn):
+        super().__init__()
+        self._fn = fn
+
+    @java_method("()V")
+    def run(self):
+        self._fn()
+
+
+class _ClickListener(PythonJavaClass):
+    __javainterfaces__ = ["android/view/View$OnClickListener"]
+    __javacontext__ = "app"
+
+    def __init__(self, fn):
+        super().__init__()
+        self._fn = fn
+
+    @java_method("(Landroid/view/View;)V")
+    def onClick(self, view):
+        self._fn()
+
+
+_STATE = {"root": None, "webview": None, "poller": None,
+          "on_close": None, "closed": threading.Event()}
+
+
+def _run_ui(fn):
+    _activity().runOnUiThread(_Runnable(fn))
+
+
+def _ui_open(url, title, on_manual_done):
+    """在 UI 线程挂载覆盖层：[完成登录按钮 + WebView] 全屏。"""
+    LinearLayout = autoclass("android.widget.LinearLayout")
+    Button = autoclass("android.widget.Button")
+    WebView = autoclass("android.webkit.WebView")
+    LayoutParams = autoclass("android.view.ViewGroup$LayoutParams")
+    activity = _activity()
+
+    root = LinearLayout(activity)
+    root.setOrientation(LinearLayout.VERTICAL)
+
+    btn = Button(activity)
+    btn.setText("完成登录后点这里返回 ▸")
+    btn.setBackgroundColor(0xFF2563EB)
+    btn.setTextColor(0xFFFFFFFF)
+    btn.setHeight(160)
+    btn.setOnClickListener(_ClickListener(on_manual_done))
+    root.addView(btn, LayoutParams(-1, 160))
+
+    wv = WebView(activity)
+    settings = wv.getSettings()
+    settings.setJavaScriptEnabled(True)
+    settings.setDomStorageEnabled(True)
+    settings.setSupportZoomControls(True)
+    try:
+        CookieManager = autoclass("android.webkit.CookieManager")
+        cm = CookieManager.getInstance()
+        cm.setAcceptCookie(True)
+        try:
+            cm.setAcceptThirdPartyCookies(wv, True)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    wv.loadUrl(url)
+    root.addView(wv, LayoutParams(-1, -1))
+
+    activity.addContentView(root, LayoutParams(-1, -1))
+    _STATE["root"] = root
+    _STATE["webview"] = wv
+    _STATE["closed"].clear()
+
+
+def _ui_close():
+    """在 UI 线程卸载覆盖层（Android 无 removeContentView，用 removeView）。"""
+    root = _STATE["root"]
+    if root is None:
+        return
+    try:
+        parent = root.getParent()
+        if parent is not None:
+            parent.removeView(root)
+    finally:
+        _STATE["root"] = None
+        _STATE["webview"] = None
+        _STATE["closed"].set()
+
+
+def current_cookies(url):
+    """取 WebView 里 url 域的 Cookie（含 httpOnly）。失败返回 None。"""
+    box = {}
+
+    def grab():
+        try:
+            CookieManager = autoclass("android.webkit.CookieManager")
+            cm = CookieManager.getInstance()
+            try:
+                cm.flush()
+            except Exception:
+                pass
+            box["cookie"] = cm.getCookie(url)
+        except Exception as e:
+            box["err"] = str(e)
+
+    try:
+        _run_ui(grab)
+        for _ in range(50):  # 等 UI 线程回写，最多 2.5s
+            if "cookie" in box or "err" in box:
+                break
+            time.sleep(0.05)
+    except Exception as e:
+        raise WebLoginError(f"读取 Cookie 失败: {e}")
+    if "err" in box:
+        raise WebLoginError(f"读取 Cookie 失败: {box['err']}")
+    return box.get("cookie")
+
+
+def open_login(url, auth_keys=(), on_done=None, title="登录"):
+    """打开 WebView 登录层。
+
+    url: 登录页地址
+    auth_keys: 登录成功特征 Cookie 键（如百度 BDUSS）；命中即自动完成
+    on_done(cookie_str, auto: bool): 完成回调（手动按钮或特征命中）
+    返回 True 表示已打开；失败抛 WebLoginError（调用方回退手动路径）。
+    """
+    if not _JNIUS_OK:
+        raise WebLoginError("pyjnius 不可用")
+    if _STATE["root"] is not None:
+        raise WebLoginError("已有登录窗口打开中")
+
+    done_once = threading.Event()
+
+    def _finish(auto):
+        if done_once.is_set():
+            return
+        done_once.set()
+        cookie = None
+        try:
+            cookie = current_cookies(url)
+        except Exception:
+            pass
+        try:
+            _run_ui(_ui_close)
+        except Exception:
+            _ui_close()
+        poller = _STATE["poller"]
+        if poller is not None:
+            poller["stop"] = True
+            _STATE["poller"] = None
+        if on_done is not None:
+            try:
+                on_done(cookie or "", auto)
+            except Exception:
+                pass
+
+    _run_ui(lambda: _ui_open(url, title, lambda: _finish(False)))
+
+    def _poll():
+        keys = [k.lower() for k in auth_keys]
+        while not _STATE["closed"].is_set():
+            p = _STATE["poller"]
+            if p is None or p.get("stop"):
+                return
+            if keys:
+                try:
+                    c = current_cookies(url)
+                    if c and all(f"{k}=" in c.lower() for k in keys):
+                        _finish(True)
+                        return
+                except Exception:
+                    pass
+            time.sleep(1.2)
+
+    t = threading.Thread(target=_poll, daemon=True)
+    _STATE["poller"] = {"stop": False}
+    _STATE["closed"].clear()
+    t.start()
+    return True
+
+
+def is_open():
+    return _STATE["root"] is not None

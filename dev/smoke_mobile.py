@@ -1,7 +1,10 @@
 """mobile/main.py 的无 Kivy 冒烟测试：mock kivy 模块后跑完整流程。
 
-覆盖：中文字体注册、三屏结构（下载/账号/历史）、账号 Cookie 持久化与
-自动匹配、下载历史永久记录与开关、删除账号、主下载回归。
+覆盖 v1.7.0：中文字体注册、浅色主题、四屏结构（首页/下载/账号/历史）、
+18 家网盘宫格、无 WebView 回退手动登录、WebView 登录回调账簿双写、
+已登录徽标、空 Cookie 不覆盖、删除登录、前台服务保活 start/stop、
+下载结束停保活、账号 Cookie 持久化与自动匹配、历史永久记录与开关、
+失败记录、重跑预填、清空历史。
 可复跑：python3 dev/smoke_mobile.py
 """
 import os
@@ -16,6 +19,7 @@ sys.path.insert(0, str(ROOT / "mobile"))
 
 os.environ["PANBOOST_HOME"] = tempfile.mkdtemp(prefix="pbmobile_")
 os.environ.setdefault("PANBOOST_NO_FSYNC", "1")
+os.environ.setdefault("PANBOOST_CB_SCALE", "0.02")
 
 # ---- mock kivy（必须在 import mobile.main 之前） ----
 kivy = types.ModuleType("kivy")
@@ -46,10 +50,16 @@ class _Widget:
         self.value = 0.0
         self.children = []
         self._on_release = kw.get("on_release")
+        self._bound = {}
 
-    def trigger(self):
-        if callable(self._on_release):
-            self._on_release(self)
+    def bind(self, *largs, **kwargs):
+        for k, v in kwargs.items():
+            self._bound[k] = v
+
+    def trigger(self, name="on_release", *args):
+        fn = self._bound.get(name) or self._on_release
+        if callable(fn):
+            fn(self, *args)
 
     def clear_widgets(self):
         self.children = []
@@ -74,12 +84,13 @@ class _Builder:
                           for k, v in ids.items()})
             return s
 
-        main = screen("main",
-                      url_input=_Widget(), cookie_input=_Widget(),
-                      threads_spinner=_Widget(text="16"),
-                      insecure_switch=_Widget(active=False),
-                      go_btn=_Widget(text="开始下载"), progress=_Widget(),
-                      status_lbl=_Widget(), log_lbl=_Widget())
+        home = screen("home", pan_grid=_Widget(), home_status=_Widget())
+        download = screen("download",
+                          url_input=_Widget(), cookie_input=_Widget(),
+                          threads_spinner=_Widget(text="auto"),
+                          insecure_switch=_Widget(active=False),
+                          go_btn=_Widget(text="开始下载"), progress=_Widget(),
+                          status_lbl=_Widget(), log_lbl=_Widget())
         accounts = screen("accounts",
                           domain_input=_Widget(), cookie_input=_Widget(),
                           accounts_status=_Widget(),
@@ -87,8 +98,9 @@ class _Builder:
         history = screen("history", rec_switch=_Widget(active=True),
                          history_box=_Widget())
         sm = types.SimpleNamespace()
-        sm.current = "main"
-        sm._screens = {"main": main, "accounts": accounts, "history": history}
+        sm.current = "home"
+        sm._screens = {"home": home, "download": download,
+                       "accounts": accounts, "history": history}
         sm.get_screen = sm._screens.get
         return sm
 
@@ -98,6 +110,8 @@ lang_mod.Builder = _Builder
 metrics_mod = types.ModuleType("kivy.metrics")
 metrics_mod.dp = lambda x: x
 metrics_mod.sp = lambda x: x
+props_mod = types.ModuleType("kivy.properties")
+props_mod.ListProperty = lambda *a, **k: list(a[0]) if a else []
 uix_mod = types.ModuleType("kivy.uix")
 btn_mod = types.ModuleType("kivy.uix.button")
 btn_mod.Button = _Btn
@@ -115,7 +129,6 @@ sm_mod.ScreenManager = _Widget
 spin_mod = types.ModuleType("kivy.uix.spinner")
 spin_mod.SpinnerOption = _Widget
 spin_mod.Spinner = _Widget
-sm_mod.ScreenManager = _Widget
 
 
 class _LabelBase:
@@ -132,16 +145,33 @@ kivy.app = app_mod
 kivy.clock = clock_mod
 kivy.lang = lang_mod
 kivy.metrics = metrics_mod
+kivy.properties = props_mod
 kivy.uix = uix_mod
 kivy.core = core_mod
 sys.modules.update({
     "kivy": kivy, "kivy.app": app_mod, "kivy.clock": clock_mod,
     "kivy.lang": lang_mod, "kivy.metrics": metrics_mod,
-    "kivy.uix": uix_mod, "kivy.uix.button": btn_mod,
-    "kivy.uix.label": lbl_mod, "kivy.core": core_mod,
-    "kivy.core.text": text_mod, "kivy.uix.screenmanager": sm_mod,
-    "kivy.uix.spinner": spin_mod,
+    "kivy.properties": props_mod, "kivy.uix": uix_mod,
+    "kivy.uix.button": btn_mod, "kivy.uix.label": lbl_mod,
+    "kivy.core": core_mod, "kivy.core.text": text_mod,
+    "kivy.uix.screenmanager": sm_mod, "kivy.uix.spinner": spin_mod,
 })
+
+# ---- mock android 前台服务（keepalive 用，import main 前注册） ----
+SVC_CALLS = {"start": 0, "stop": 0}
+
+
+class _MockService:
+    def start(self, *a, **kw):
+        SVC_CALLS["start"] += 1
+
+    def stop(self):
+        SVC_CALLS["stop"] += 1
+
+
+android_mod = types.ModuleType("android")
+android_mod.AndroidService = lambda title, desc: _MockService()
+sys.modules["android"] = android_mod
 
 import main as mobile_main  # noqa: E402
 from test_server import TestServer  # noqa: E402
@@ -156,12 +186,10 @@ def check(name, ok, detail=""):
 
 
 def main():
-    # 用例0：中文字体注册（本地存在真字体文件）
+    # ---- 静态检查 ----
     check("壳-中文字体已注册", mobile_main.register_font(),
           "fonts/cjk.ttf 存在且注册成功")
 
-    # 用例0b：KV 引用的自定义类必须在 Python 有定义（v1.6.1 闪退根因，
-    # mock 的 Builder 测不出，靠静态扫描防回归；真 Kivy 校验见 check_kv.py）
     import re
     kv_names = set(re.findall(r"</?([A-Z][A-Za-z0-9_]*)>?:", mobile_main.KV))
     kv_std = {
@@ -178,6 +206,10 @@ def main():
     missing = [n for n in custom if n not in defined]
     check("壳-KV自定义类均有Python定义", not missing and bool(custom),
           f"自定义类={custom} 缺失={missing}")
+    check("壳-四屏类已定义且为Screen子类",
+          all(issubclass(getattr(mobile_main, n, type(None)), _Screen)
+              for n in ("MainScreen", "DownloadScreen", "AccountsScreen",
+                        "HistoryScreen")))
     vals = re.search(r"values: \[([^\]]+)\]", mobile_main.KV).group(1)
     check("壳-线程选项含512/1024", "'512'" in vals and "'1024'" in vals,
           vals)
@@ -186,11 +218,22 @@ def main():
           and "option_cls: app.compact_option" in mobile_main.KV
           and hasattr(mobile_main, "CompactOption")
           and hasattr(mobile_main.PanBoostApp, "compact_option"))
-    check("壳-三屏类已定义且为Screen子类",
-          all(issubclass(getattr(mobile_main, n, type(None)), _Screen)
-              for n in ("MainScreen", "AccountsScreen", "HistoryScreen")))
+    check("壳-浅色主题（弃用黑底）",
+          mobile_main.BG[0] > 0.9 and mobile_main.BG[1] > 0.9
+          and "rgba: 0.957, 0.965, 0.984, 1" in mobile_main.KV
+          and "RoundedRectangle" in mobile_main.KV,
+          f"BG={mobile_main.BG}")
     check("壳-崩溃日志钩子已安装", sys.excepthook is not sys.__excepthook__,
           "sys.excepthook 已替换为 crash logger")
+    pans = mobile_main.PANS
+    ok_pans = (len(pans) >= 18
+               and all(p.get("key") and p.get("name")
+                       and str(p.get("login", "")).startswith("http")
+                       and isinstance(p.get("domains"), list) and p["domains"]
+                       and isinstance(p.get("auth_keys"), list) for p in pans)
+               and len({p["key"] for p in pans}) == len(pans))
+    check("壳-网盘清单18家结构完整", ok_pans,
+          f"{len(pans)}家: " + "、".join(p["name"] for p in pans[:5]) + "…")
 
     data = os.urandom(3 * 1024 * 1024)
     srv = TestServer()
@@ -201,42 +244,85 @@ def main():
     app = mobile_main.PanBoostApp()
     app.build()
 
-    # 用例1：账号保存 → 持久化 → 域名匹配
+    # ---- 首页宫格 ----
+    grid = app._scr("home").ids.pan_grid
+    check("壳-宫格卡片数等于网盘数", len(grid.children) == len(pans),
+          f"{len(grid.children)} vs {len(pans)}")
+    first_txt = grid.children[0].text  # add_widget 顺序：第一个是百度
+    check("壳-未登录卡片显示域名", "baidu.com" in first_txt
+          and "已登录" not in first_txt, first_txt.replace("\n", " "))
+
+    # 无 WebView 环境 → 回退账号屏手动粘贴（预填域名）
+    app.pan_login("baidu")
+    check("壳-无WebView回退手动登录路径",
+          app._scr("accounts").ids.domain_input.text == "baidu.com"
+          and app.root.current == "accounts")
+
+    # WebView 可用路径：mock open_login 直接回调（模拟自动检测到 Cookie）
+    mobile_main.weblogin.available = lambda: True
+    orig_open = mobile_main.weblogin.open_login
+    mobile_main.weblogin.open_login = (
+        lambda url, keys, on_done, title="": on_done("BDUSS=fake123", True))
+    app.pan_login("baidu")
+    mobile_main.weblogin.open_login = orig_open
+    acc = mobile_main.load_accounts()
+    check("壳-登录记录账簿永久保存",
+          acc.get("baidu", {}).get("name") == "百度网盘", str(list(acc)))
+    check("壳-登录Cookie双写引擎store",
+          pb.load_cookie_store().get("baidu.com") == "BDUSS=fake123",
+          str({k: v[:12] for k, v in pb.load_cookie_store().items()}))
+    baidu_txt = app._scr("home").ids.pan_grid.children[0].text
+    check("壳-已登录徽标刷新", "已登录" in baidu_txt,
+          baidu_txt.replace("\n", " "))
+
+    # 空 Cookie 不覆盖已有登录
+    r = mobile_main.record_login("baidu", "", True)
+    check("壳-空Cookie不覆盖登录", r is False
+          and pb.load_cookie_store().get("baidu.com") == "BDUSS=fake123")
+
+    # 删除登录：账簿 + store 双清
+    app.del_account("baidu")
+    check("壳-删除登录双清", "baidu" not in mobile_main.load_accounts()
+          and "baidu.com" not in pb.load_cookie_store())
+
+    # ---- 手动账号 + 自动匹配下载 + 前台保活 ----
     app._scr("accounts").ids.domain_input.text = "127.0.0.1"
     app._scr("accounts").ids.cookie_input.text = "SID=auto123"
     app.save_account()
-    store = pb.load_cookie_store()
-    check("壳-账号Cookie已持久化", store.get("127.0.0.1") == "SID=auto123",
-          str(store))
+    check("壳-手动账号Cookie已持久化",
+          pb.load_cookie_store().get("127.0.0.1") == "SID=auto123")
     app.refresh_accounts()
     n_acc = len(app._scr("accounts").ids.accounts_box.children)
     check("壳-账号列表已刷新", n_acc >= 1, f"条目数={n_acc}")
 
-    # 用例2：下载自动匹配已存账号 Cookie（服务器校验 Cookie）
     srv2 = TestServer()
     srv2.set_data(data, require_cookie="SID=auto123")
-    app._scr("main").ids.url_input.text = srv2.url + "/a.bin"
-    app._scr("main").ids.cookie_input.text = ""  # 留空 → 自动匹配
+    mobile_main.IS_ANDROID = True  # 让 on_go 走前台保活分支
+    app._scr("download").ids.url_input.text = srv2.url + "/a.bin"
+    app._scr("download").ids.cookie_input.text = ""  # 留空 → 自动匹配
     app.on_go()
     app.worker.join(timeout=90)
     files = list(Path(tmp).glob("a.bin"))
     check("壳-自动匹配Cookie下载完整",
           files and files[0].read_bytes() == data,
-          f"auto匹配日志: {[l for l in app.logs if '自动匹配' in l][:1]}")
+          f"保活日志: {[l for l in app.logs if '保活' in l][:1]}")
+    check("壳-前台服务start/stop各一次且下载结束已停",
+          SVC_CALLS["start"] == 1 and SVC_CALLS["stop"] == 1
+          and mobile_main._KEEPALIVE["svc"] is None,
+          str(SVC_CALLS))
+    mobile_main.IS_ANDROID = False
 
-    # 用例3：历史永久记录
+    # ---- 历史 ----
     h = mobile_main.load_history()
     check("壳-下载历史已写入", len(h["items"]) >= 1
           and h["items"][0]["name"] == "a.bin"
-          and h["items"][0]["status"] == "完成",
-          str(h["items"][:1]))
+          and h["items"][0]["status"] == "完成", str(h["items"][:1]))
     app.refresh_history()
     n_hist = len(app._scr("history").ids.history_box.children)
     check("壳-历史列表已刷新", n_hist >= 1, f"条目数={n_hist}")
 
-    # 用例4：历史开关关闭 → 不再记录
     app.on_rec_toggle(False)
-    app._scr("main").ids.url_input.text = srv.url + "/b.bin"
+    app._scr("download").ids.url_input.text = srv.url + "/b.bin"
     app.on_go()
     app.worker.join(timeout=90)
     h2 = mobile_main.load_history()
@@ -247,12 +333,11 @@ def main():
     check("壳-关闭记录仍正常下载", files and files[0].read_bytes() == data)
     app.on_rec_toggle(True)
 
-    # 用例5：删除账号
     app.del_account("127.0.0.1")
     check("壳-删除账号生效", "127.0.0.1" not in pb.load_cookie_store())
 
-    # 用例6：失败任务也记录历史（URL 预填重跑）
-    app._scr("main").ids.url_input.text = "http://127.0.0.1:9/f.bin"
+    # 失败任务也记录历史（URL 预填重跑）
+    app._scr("download").ids.url_input.text = "http://127.0.0.1:9/f.bin"
     app.on_go()
     app.worker.join(timeout=60)
     h3 = mobile_main.load_history()
@@ -260,10 +345,10 @@ def main():
           str(h3["items"][0]))
     app.rerun("http://example.com/rerun.bin")
     check("壳-历史点击重跑预填URL",
-          app._scr("main").ids.url_input.text == "http://example.com/rerun.bin"
-          and app.root.current == "main")
+          app._scr("download").ids.url_input.text
+          == "http://example.com/rerun.bin"
+          and app.root.current == "download")
 
-    # 用例7：清空历史
     app.clear_history()
     check("壳-清空历史", mobile_main.load_history()["items"] == [])
 

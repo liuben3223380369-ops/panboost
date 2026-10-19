@@ -64,7 +64,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.6.3-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.7.0-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -77,12 +77,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.6.3 线程选项至1024；v1.6.2 修复启动闪退）。' '三屏界面：下载 / 账号 Cookie 管理 / 下载历史。' '安装后输入直链与 Cookie 即可多线程下载（反风控引擎全量生效）。' '文件保存在 Android/data/org.panboost.app/files/ 目录；若遇异常请取该目录 crash-*.log 反馈。' '命令行完整功能请用 Termux，见 README 在 Android 手机上使用 章节。' > "$NOTES_FILE"
-          TAG="android-v1.6.3"
+          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.7.0 大版本更新）。' '浅色界面全面重设计；首页内置 18 家国内外网盘入口（百度/夸克/阿里/微云/天翼/移动/迅雷/123/蓝奏/坚果/UC/Google Drive/Dropbox/OneDrive/MEGA/pCloud/Box/Yandex），点击卡片登录并永久保存 Cookie，下载自动携带。' '下载保活：前台服务 + WakeLock，Android 12+ 锁屏/后台下载不断流。' '线程选项至 1024；异常请在应用文件目录取 crash-*.log 反馈。' '命令行完整功能请用 Termux，见 README 在 Android 手机上使用 章节。' > "$NOTES_FILE"
+          TAG="android-v1.7.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.6.3" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.7.0" --latest --notes-file "$NOTES_FILE"
           fi
 '''
 
