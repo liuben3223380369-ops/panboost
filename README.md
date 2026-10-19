@@ -204,11 +204,22 @@ python panboost.py download "直链" --cookie "..." -o ~/storage/downloads/movie
 
 ### 方式二：图形界面 APP（APK）
 
-仓库 `mobile/` 内置 Kivy 图形壳（URL/Cookie 输入、线程选择、实时进度与速度、
-断点续传），由 GitHub Actions 云端自动构建。到本仓库 **Releases 页**下载
+仓库 `mobile/` 内置 Kivy 图形壳（v1.6.1 起自带中文字体，无乱码），三屏界面：
+
+- **下载**：URL/Cookie 输入（留空自动匹配已存账号）、线程选择（auto 实测）、
+  实时进度与速度、断点续传
+- **账号**：网盘 Cookie 按域名持久化保存（永久），下载对应域名文件自动携带；
+  点击条目删除
+- **历史**：下载记录永久保存（含失败任务），可开关记录/一键清空，
+  点击历史条目预填 URL 重跑续传
+
+由 GitHub Actions 云端自动构建，到本仓库 **Releases 页**下载
 `panboost-*-android.apk`（调试签名，安装时允许"未知来源"）。下载目录为
 `Android/data/org.panboost.app/files/`（应用外部私有目录，无需存储权限，
 USB 连电脑或文件管理器可取）。
+
+> 注：App 内"账号"指网盘 Cookie 持久化管理（浏览器登录后 F12 复制），
+> 不是账密登录——各家网盘登录有验证码/扫码/加密，纯标准库无法代登录。
 
 ## 全网盘适用：如何拿到"直链 + Cookie"
 

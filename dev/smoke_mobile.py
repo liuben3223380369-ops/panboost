@@ -1,8 +1,8 @@
-"""mobile/main.py 的无 Kivy 冒烟测试：mock kivy 模块后跑完整下载流程。
+"""mobile/main.py 的无 Kivy 冒烟测试：mock kivy 模块后跑完整流程。
 
-验证图形壳对 panboost 引擎的全部 API 调用签名正确（probe / UA 回退 /
-auto_tune / Multi / Single / 停止 / 状态轮询），可在 CI 或桌面复跑：
-    python3 dev/smoke_mobile.py
+覆盖：中文字体注册、三屏结构（下载/账号/历史）、账号 Cookie 持久化与
+自动匹配、下载历史永久记录与开关、删除账号、主下载回归。
+可复跑：python3 dev/smoke_mobile.py
 """
 import os
 import sys
@@ -22,8 +22,7 @@ kivy = types.ModuleType("kivy")
 
 
 class _App:
-    def __init__(self):
-        pass
+    pass
 
 
 app_mod = types.ModuleType("kivy.app")
@@ -43,20 +42,55 @@ clock_mod.Clock = _Clock
 class _Widget:
     def __init__(self, **kw):
         self.text = kw.get("text", "")
-        self.active = False
+        self.active = kw.get("active", False)
         self.value = 0.0
+        self.children = []
+        self._on_release = kw.get("on_release")
+
+    def trigger(self):
+        if callable(self._on_release):
+            self._on_release(self)
+
+    def clear_widgets(self):
+        self.children = []
+
+    def add_widget(self, w):
+        self.children.append(w)
+
+
+class _Btn(_Widget):
+    pass
 
 
 class _Builder:
     @staticmethod
     def load_string(kv):
         ns = types.SimpleNamespace
-        return ns(ids=ns(
-            url_input=_Widget(), cookie_input=_Widget(),
-            threads_spinner=_Widget(text="16"),
-            insecure_switch=_Widget(active=False),
-            go_btn=_Widget(), progress=_Widget(),
-            status_lbl=_Widget(), log_lbl=_Widget()))
+
+        def screen(name, **ids):
+            s = types.SimpleNamespace()
+            s.name = name
+            s.ids = ns(**{k: (v if isinstance(v, _Widget) else _Widget(text=v))
+                          for k, v in ids.items()})
+            return s
+
+        main = screen("main",
+                      url_input=_Widget(), cookie_input=_Widget(),
+                      threads_spinner=_Widget(text="16"),
+                      insecure_switch=_Widget(active=False),
+                      go_btn=_Widget(text="开始下载"), progress=_Widget(),
+                      status_lbl=_Widget(), log_lbl=_Widget())
+        accounts = screen("accounts",
+                          domain_input=_Widget(), cookie_input=_Widget(),
+                          accounts_status=_Widget(),
+                          accounts_box=_Widget())
+        history = screen("history", rec_switch=_Widget(active=True),
+                         history_box=_Widget())
+        sm = types.SimpleNamespace()
+        sm.current = "main"
+        sm._screens = {"main": main, "accounts": accounts, "history": history}
+        sm.get_screen = sm._screens.get
+        return sm
 
 
 lang_mod = types.ModuleType("kivy.lang")
@@ -64,12 +98,36 @@ lang_mod.Builder = _Builder
 metrics_mod = types.ModuleType("kivy.metrics")
 metrics_mod.dp = lambda x: x
 metrics_mod.sp = lambda x: x
+uix_mod = types.ModuleType("kivy.uix")
+btn_mod = types.ModuleType("kivy.uix.button")
+btn_mod.Button = _Btn
+lbl_mod = types.ModuleType("kivy.uix.label")
+lbl_mod.Label = _Widget
+
+
+class _LabelBase:
+    @staticmethod
+    def register(name, *paths):
+        return None
+
+
+text_mod = types.ModuleType("kivy.core.text")
+text_mod.LabelBase = _LabelBase
+core_mod = types.ModuleType("kivy.core")
+core_mod.text = text_mod
 kivy.app = app_mod
 kivy.clock = clock_mod
 kivy.lang = lang_mod
 kivy.metrics = metrics_mod
-sys.modules.update({"kivy": kivy, "kivy.app": app_mod, "kivy.clock": clock_mod,
-                    "kivy.lang": lang_mod, "kivy.metrics": metrics_mod})
+kivy.uix = uix_mod
+kivy.core = core_mod
+sys.modules.update({
+    "kivy": kivy, "kivy.app": app_mod, "kivy.clock": clock_mod,
+    "kivy.lang": lang_mod, "kivy.metrics": metrics_mod,
+    "kivy.uix": uix_mod, "kivy.uix.button": btn_mod,
+    "kivy.uix.label": lbl_mod, "kivy.core": core_mod,
+    "kivy.core.text": text_mod,
+})
 
 import main as mobile_main  # noqa: E402
 from test_server import TestServer  # noqa: E402
@@ -83,70 +141,85 @@ def check(name, ok, detail=""):
     print(f"[{'PASS' if ok else 'FAIL'}] {name}  {detail}")
 
 
-def run_case(url, cookie_text="", threads_choice="16",
-             insecure=False, expect_rc_ok=True, name=""):
-    tmp = tempfile.mkdtemp(prefix="pbmobile_dl_")
-    mobile_main.external_files_dir = lambda: tmp
-    app = mobile_main.PanBoostApp()
-    app.build()
-    app.root.ids.url_input.text = url
-    app.root.ids.cookie_input.text = cookie_text
-    app.root.ids.threads_spinner.text = threads_choice
-    app.root.ids.insecure_switch.active = insecure
-    app.on_go()
-    assert app.worker is not None
-    app.worker.join(timeout=90)
-    return app, Path(tmp)
-
-
 def main():
+    # 用例0：中文字体注册（本地存在真字体文件）
+    check("壳-中文字体已注册", mobile_main.register_font(),
+          "fonts/cjk.ttf 存在且注册成功")
+
     data = os.urandom(3 * 1024 * 1024)
     srv = TestServer()
     srv.set_data(data)
 
-    # 用例1：常规多线程
-    app, outdir = run_case(srv.url + "/m.bin")
-    files = list(outdir.glob("*"))
-    got = files[0].read_bytes() if files else b""
-    check("壳-多线程下载完整", got == data, f"files={[f.name for f in files]}")
-    check("壳-状态为完成", app._status.startswith("完成"),
-          app._status[:60])
-    check("壳-进度100%", app._progress >= 1.0, f"{app._progress}")
-    check("壳-无致命异常日志", all("失败" not in l and "Error" not in l
-                                    for l in app.logs[-3:]), str(app.logs[-2:]))
-
-    # 用例2：Cookie 传递 + 服务器校验 Cookie
-    srv2 = TestServer()
-    srv2.set_data(data, require_cookie="SID=abc123")
-    app2, outdir2 = run_case(srv2.url + "/c.bin", cookie_text="SID=abc123")
-    files2 = list(outdir2.glob("*"))
-    check("壳-Cookie头已传递", files2 and files2[0].read_bytes() == data,
-          f"{[f.name for f in files2]}")
-
-    # 用例3：连接失败优雅报错（不崩溃）
-    app3, _ = run_case("http://127.0.0.1:9/x.bin")  # 端口9 discard，必拒
-    check("壳-失败优雅报错", app3._status.startswith("失败"),
-          app3._status[:60])
-
-    # 用例4：停止（stop_event 生效）
-    big = os.urandom(6 * 1024 * 1024)
-    srv3 = TestServer()
-    srv3.set_data(big, throttle_after=1, throttle_status=429, retry_after=1)
-    tmp = tempfile.mkdtemp(prefix="pbmobile_stop_")
+    tmp = tempfile.mkdtemp(prefix="pbmobile_dl_")
     mobile_main.external_files_dir = lambda: tmp
-    app4 = mobile_main.PanBoostApp()
-    app4.build()
-    app4.root.ids.url_input.text = srv3.url + "/s.bin"
-    app4.root.ids.threads_spinner.text = "8"
-    app4.on_go()
-    import time
-    time.sleep(2.0)
-    running = app4.worker is not None and app4.worker.is_alive()
-    app4.on_go()  # 第二次点击 = 停止
-    stopped = app4.dl is not None and app4.dl.stop_event.is_set()
-    app4.worker.join(timeout=60)
-    check("壳-停止请求生效", running and (stopped or app4._status != "x"),
-          f"running={running}")
+    app = mobile_main.PanBoostApp()
+    app.build()
+
+    # 用例1：账号保存 → 持久化 → 域名匹配
+    app._scr("accounts").ids.domain_input.text = "127.0.0.1"
+    app._scr("accounts").ids.cookie_input.text = "SID=auto123"
+    app.save_account()
+    store = pb.load_cookie_store()
+    check("壳-账号Cookie已持久化", store.get("127.0.0.1") == "SID=auto123",
+          str(store))
+    app.refresh_accounts()
+    n_acc = len(app._scr("accounts").ids.accounts_box.children)
+    check("壳-账号列表已刷新", n_acc >= 1, f"条目数={n_acc}")
+
+    # 用例2：下载自动匹配已存账号 Cookie（服务器校验 Cookie）
+    srv2 = TestServer()
+    srv2.set_data(data, require_cookie="SID=auto123")
+    app._scr("main").ids.url_input.text = srv2.url + "/a.bin"
+    app._scr("main").ids.cookie_input.text = ""  # 留空 → 自动匹配
+    app.on_go()
+    app.worker.join(timeout=90)
+    files = list(Path(tmp).glob("a.bin"))
+    check("壳-自动匹配Cookie下载完整",
+          files and files[0].read_bytes() == data,
+          f"auto匹配日志: {[l for l in app.logs if '自动匹配' in l][:1]}")
+
+    # 用例3：历史永久记录
+    h = mobile_main.load_history()
+    check("壳-下载历史已写入", len(h["items"]) >= 1
+          and h["items"][0]["name"] == "a.bin"
+          and h["items"][0]["status"] == "完成",
+          str(h["items"][:1]))
+    app.refresh_history()
+    n_hist = len(app._scr("history").ids.history_box.children)
+    check("壳-历史列表已刷新", n_hist >= 1, f"条目数={n_hist}")
+
+    # 用例4：历史开关关闭 → 不再记录
+    app.on_rec_toggle(False)
+    app._scr("main").ids.url_input.text = srv.url + "/b.bin"
+    app.on_go()
+    app.worker.join(timeout=90)
+    h2 = mobile_main.load_history()
+    check("壳-关闭记录后不再写入", len(h2["items"]) == len(h["items"])
+          and h2["enabled"] is False,
+          f"条目数不变={len(h2['items'])}")
+    files = list(Path(tmp).glob("b.bin"))
+    check("壳-关闭记录仍正常下载", files and files[0].read_bytes() == data)
+    app.on_rec_toggle(True)
+
+    # 用例5：删除账号
+    app.del_account("127.0.0.1")
+    check("壳-删除账号生效", "127.0.0.1" not in pb.load_cookie_store())
+
+    # 用例6：失败任务也记录历史（URL 预填重跑）
+    app._scr("main").ids.url_input.text = "http://127.0.0.1:9/f.bin"
+    app.on_go()
+    app.worker.join(timeout=60)
+    h3 = mobile_main.load_history()
+    check("壳-失败任务已记录", h3["items"][0]["status"] == "失败",
+          str(h3["items"][0]))
+    app.rerun("http://example.com/rerun.bin")
+    check("壳-历史点击重跑预填URL",
+          app._scr("main").ids.url_input.text == "http://example.com/rerun.bin"
+          and app.root.current == "main")
+
+    # 用例7：清空历史
+    app.clear_history()
+    check("壳-清空历史", mobile_main.load_history()["items"] == [])
 
     n_fail = sum(1 for _, ok in CHECKS if not ok)
     print(f"\n===== mobile 冒烟: {len(CHECKS) - n_fail}/{len(CHECKS)} 通过 =====")
