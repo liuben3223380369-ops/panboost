@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.6.1。
+"""PanBoost Android 图形壳（Kivy）v1.6.2。
 
 三屏界面：
   下载 —— URL/线程/进度/日志（引擎反风控全量生效）
@@ -8,6 +8,12 @@
 
 字体：fonts/cjk.ttf（Noto Sans SC 子集，21985 字符）重注册为 Kivy
 默认字体 Roboto——修复默认字体无 CJK 字形导致的中文方块乱码。
+
+v1.6.2：修复 v1.6.1 启动闪退——KV 引用的 MainScreen/AccountsScreen/
+HistoryScreen 此前未在 Python 定义，Kivy Builder 实例化时抛
+FactoryException 导致打开即崩。自定义屏必须先在 Python 定义（Widget
+元类会自动注册进 Kivy Factory）。另增崩溃日志兜底：任何未捕获异常
+写入下载目录 crash-*.log，可用文件管理器取回诊断。
 """
 import json
 import os
@@ -52,6 +58,22 @@ from kivy.lang import Builder  # noqa: E402
 from kivy.metrics import dp, sp  # noqa: E402
 from kivy.uix.button import Button  # noqa: E402
 from kivy.uix.label import Label  # noqa: E402
+from kivy.uix.screenmanager import Screen  # noqa: E402
+
+SHELL_VERSION = "1.6.2"
+
+
+class MainScreen(Screen):
+    """KV 规则引用的自定义屏必须在 Python 定义，否则
+    Builder 抛 FactoryException、App 启动即闪退（v1.6.1 事故根因）。"""
+
+
+class AccountsScreen(Screen):
+    pass
+
+
+class HistoryScreen(Screen):
+    pass
 
 
 def external_files_dir():
@@ -65,6 +87,41 @@ def external_files_dir():
     except Exception:
         pass
     return str(Path(__file__).parent / "downloads")
+
+
+def _install_crash_logger():
+    """崩溃兜底：未捕获异常写 crash-*.log 到外部私有目录（可取回诊断）。"""
+    def _dump(tag):
+        try:
+            import traceback
+            d = external_files_dir()
+            os.makedirs(d, exist_ok=True)
+            p = os.path.join(
+                d, "crash-%s.log" % time.strftime("%Y%m%d-%H%M%S"))
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(tag + traceback.format_exc())
+        except Exception:
+            pass
+
+    def _hook(t, v, tb):
+        _dump("sys.excepthook: %s: %s\n" % (t.__name__, v))
+        sys.__excepthook__(t, v, tb)
+
+    sys.excepthook = _hook
+    try:
+        from kivy.base import ExceptionHandler, ExceptionManager
+
+        class _CrashHandler(ExceptionHandler):
+            def handle_exception(self, e):
+                _dump("kivy: %s: %s\n" % (type(e).__name__, e))
+                return ExceptionManager.RAISE
+
+        ExceptionManager.handler = _CrashHandler()
+    except Exception:
+        pass
+
+
+_install_crash_logger()
 
 
 def _safe_name(name, url):
@@ -88,11 +145,14 @@ def load_history():
 
 
 def save_history(h):
-    pb.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = str(HISTORY_FILE) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(h, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, HISTORY_FILE)
+    try:
+        pb.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = str(HISTORY_FILE) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(h, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, HISTORY_FILE)
+    except Exception:
+        pass
 
 
 def add_history(entry):
@@ -118,7 +178,7 @@ ScreenManager:
         spacing: dp(6)
 
         Label:
-            text: 'PanBoost v' + app.pb_version
+            text: 'PanBoost v' + app.shell_version
             font_size: sp(19)
             bold: True
             size_hint_y: None
@@ -317,7 +377,7 @@ class PanBoostApp(App):
     title = "PanBoost"
 
     def build(self):
-        self.pb_version = pb.VERSION
+        self.shell_version = SHELL_VERSION
         self.dl = None
         self.worker = None
         self.logs = []

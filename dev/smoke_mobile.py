@@ -103,6 +103,15 @@ btn_mod = types.ModuleType("kivy.uix.button")
 btn_mod.Button = _Btn
 lbl_mod = types.ModuleType("kivy.uix.label")
 lbl_mod.Label = _Widget
+sm_mod = types.ModuleType("kivy.uix.screenmanager")
+
+
+class _Screen(_Widget):
+    pass
+
+
+sm_mod.Screen = _Screen
+sm_mod.ScreenManager = _Widget
 
 
 class _LabelBase:
@@ -126,7 +135,7 @@ sys.modules.update({
     "kivy.lang": lang_mod, "kivy.metrics": metrics_mod,
     "kivy.uix": uix_mod, "kivy.uix.button": btn_mod,
     "kivy.uix.label": lbl_mod, "kivy.core": core_mod,
-    "kivy.core.text": text_mod,
+    "kivy.core.text": text_mod, "kivy.uix.screenmanager": sm_mod,
 })
 
 import main as mobile_main  # noqa: E402
@@ -145,6 +154,30 @@ def main():
     # 用例0：中文字体注册（本地存在真字体文件）
     check("壳-中文字体已注册", mobile_main.register_font(),
           "fonts/cjk.ttf 存在且注册成功")
+
+    # 用例0b：KV 引用的自定义类必须在 Python 有定义（v1.6.1 闪退根因，
+    # mock 的 Builder 测不出，靠静态扫描防回归；真 Kivy 校验见 check_kv.py）
+    import re
+    kv_names = set(re.findall(r"</?([A-Z][A-Za-z0-9_]*)>?:", mobile_main.KV))
+    kv_std = {
+        "ScreenManager", "Screen", "Widget", "BoxLayout", "GridLayout",
+        "AnchorLayout", "StackLayout", "RelativeLayout", "FloatLayout",
+        "ScatterLayout", "ScrollView", "Label", "Button", "TextInput",
+        "Spinner", "Switch", "CheckBox", "ProgressBar", "Slider", "Image",
+        "ToggleButton", "Accordion", "TabbedPanel", "Popup", "Carousel",
+        "DropDown", "ActionBar", "Video", "Canvas",
+    }
+    custom = sorted(n for n in kv_names if n not in kv_std)
+    py_src = Path(mobile_main.__file__).read_text(encoding="utf-8")
+    defined = set(re.findall(r"^class\s+([A-Za-z0-9_]+)\b", py_src, re.M))
+    missing = [n for n in custom if n not in defined]
+    check("壳-KV自定义类均有Python定义", not missing and bool(custom),
+          f"自定义类={custom} 缺失={missing}")
+    check("壳-三屏类已定义且为Screen子类",
+          all(issubclass(getattr(mobile_main, n, type(None)), _Screen)
+              for n in ("MainScreen", "AccountsScreen", "HistoryScreen")))
+    check("壳-崩溃日志钩子已安装", sys.excepthook is not sys.__excepthook__,
+          "sys.excepthook 已替换为 crash logger")
 
     data = os.urandom(3 * 1024 * 1024)
     srv = TestServer()
