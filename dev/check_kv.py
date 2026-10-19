@@ -67,8 +67,15 @@ def main():
         f"option_cls 非法: {spinner.option_cls}"
     vals = [str(v) for v in spinner.values]
     assert "512" in vals and "1024" in vals, f"线程选项缺失: {vals}"
+    def _walk(w):
+        out = []
+        for c in w.children:
+            out.append(c)
+            out.extend(_walk(c))
+        return out
+
     spinner._build_dropdown()
-    opts = [w for w in spinner._dropdown.children
+    opts = [w for w in _walk(spinner._dropdown)
             if isinstance(w, SpinnerOption)]
     assert len(opts) == len(vals), \
         f"下拉构建失败: {len(opts)}/{len(vals)}"
