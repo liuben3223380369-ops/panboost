@@ -61,7 +61,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.8.3-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.8.4-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -74,10 +74,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.3 系统级根治版）。' '真机反馈 v1.8.2 后百度已正常，但其他网盘仍跳"下载网盘APP"界面、手势返回仍无效——抓 SDL 官方源码定位真正根由后本次系统级根治：' '①"手势/返回键无法关闭登录页"——Android 10+ 手势导航的返回手势不产生键盘事件，直接调 Activity.onBackPressed()；SDL 源码里 trap 开启时该函数直接 return（手势被吞，什么都不发生），此前三层键盘拦截全部收不到手势。本次把登录层改为全屏 Dialog 承载：手势/返回键自动取消 Dialog（Android 系统标准行为），不再依赖任何键盘事件，这是唯一系统级可靠路径。' '②"其他网盘仍跳下载App界面"——导航拦截器 shouldOverrideUrlLoading 对服务端 302 重定向无效（Android 官方文档明确），网盘 H5 壳"跳下载App"很多正是 302 落地。本次在 onPageStarted（一切导航必经点，含 302 落地）加装守卫：应用市场类 URL（market://、各应用商店）命中即停止加载，并记录完整导航日志（登录结束后落 nav-*.log，可取回诊断"到底跳去了哪"）。' '百度修复（v1.8.2）、PC 版登录页、桌面 UA、导航守卫等此前修复全部保留。' 'v1.8.0 功能全量包含：分享链接直接下载（蓝奏云/123云盘免登录，夸克网盘需先登录），多文件分享自动批量下载、支持提取码（链接后加 ?code=xxxx）。首页 18 家国内外网盘入口，登录 Cookie 永久保存、下载自动携带；前台服务保活锁屏不断流。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v1.8.3"
+          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.4 双根因修复版）。' '真机反馈 v1.8.3 点击网盘卡片后只弹"蓝灰黑三色小弹窗"、网页什么都没有、点击任何位置闪退——经 pyjnius 官方文档与 AOSP 框架源码定位双根因，本次修复：' '①"三色弹窗无内容"——Dialog 用默认浮动主题时，Android 框架（PhoneWindow）会强制把窗口尺寸压成"包住内容"模式，网页区域高度被压成 0，只剩两个按钮和深色背景。修复：对话框显示后显式设置全屏尺寸，网页区域恢复正常，v1.8.2 已验证的登录页（含百度 passport）重新正常显示。' '②"点击就闪退"——顶部两个按钮的点击回调对象此前未持有 Python 强引用（pyjnius 官方文档明确：Java 代理只存指针不持引用，Python 引用计数归零立即回收，此后 Java 侧一点按钮就触发原生崩溃）。修复：全部回调对象强引用保存，按钮点击不再闪退。' '③两项加固——WebView 渲染进程崩溃时自动关闭登录层（不处理时系统会杀掉整个 App）；登录回调统一调度回主线程操作界面，消除跨线程崩溃隐患。' 'v1.8.3 的手势返回（全屏 Dialog 系统级处理）、302 市场页拦截（onPageStarted 守卫）、导航日志（nav-*.log）等此前修复全部保留。' 'v1.8.0 功能全量包含：分享链接直接下载（蓝奏云/123云盘免登录，夸克网盘需先登录），多文件分享自动批量下载、支持提取码（链接后加 ?code=xxxx）。首页 18 家国内外网盘入口，登录 Cookie 永久保存、下载自动携带；前台服务保活锁屏不断流。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v1.8.4"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.3" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.4" --latest --notes-file "$NOTES_FILE"
           fi

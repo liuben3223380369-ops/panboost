@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.8.3。
+"""PanBoost Android 图形壳（Kivy）v1.8.4。
+
+v1.8.4（真机反馈第四轮，双根因源码实锤）：v1.8.3 点击网盘卡片后
+只弹"蓝灰黑三色小弹窗"、网页什么都没有，点击任何位置闪退——
+① 三色弹窗：Dialog(activity) 用默认 floating 主题，AOSP
+  PhoneWindow.generateLayout() 强制 setLayout(WRAP_CONTENT,
+  WRAP_CONTENT)——窗口 wrap 后 WebView 高度塌陷成 0，只剩 160px
+  按钮栏（灰✕+蓝✓）和深色窗口背景（黑）。修复：show() 后显式
+  getWindow().setLayout(MATCH_PARENT, MATCH_PARENT) 全屏。
+② 点击闪退：✕/✓ 按钮的 _ClickListener 内联创建未持 Python 强
+  引用——pyjnius 官方文档明确 proxy 只存指针不持引用，CPython
+  引用计数归零立即 GC，Java 侧点击已死 proxy 必 native crash。
+  修复：所有回调对象强引用存 weblogin._STATE（click_cbs）。
+③ 加固：WebView 渲染进程崩溃（onRenderProcessGone）不处理时
+  系统默认杀整个 App——桥接类转发返回 true + 自动关层；
+  登录回调（on_done/on_cancel）可能来自 Android UI 线程，Kivy
+  控件操作统一经 Clock.schedule_once 调度回 Kivy 主线程。
 
 v1.8.3（真机反馈第三轮，SDL 源码实锤）：v1.8.2 后百度已正常
 （passport 登录页生效），但 ①其他网盘卡片仍跳"下载网盘APP"
@@ -100,7 +116,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.8.3"
+SHELL_VERSION = "1.8.4"
 
 
 def register_font():
@@ -190,6 +206,20 @@ def _dump_crash(tag):
             f.write(tag + traceback.format_exc())
     except Exception:
         pass
+
+
+def _on_ui(fn):
+    """Kivy 控件操作调度回 Kivy 主线程（v1.8.4 线程安全加固）。
+
+    登录层回调（on_done/on_cancel）可能来自 Android UI 线程（按钮
+    点击/Dialog 取消/渲染进程崩溃）或轮询线程——Kivy 控件属性操作
+    非线程安全，跨线程直调有底层崩溃风险。Clock.schedule_once 是
+    Kivy 官方的跨线程调度方式；不可用时同步直调（冒烟测试 mock）。
+    """
+    try:
+        Clock.schedule_once(lambda _dt: fn())
+    except Exception:
+        fn()
 
 
 def _dump_nav_log(pan_key):
@@ -849,12 +879,12 @@ class PanBoostApp(App):
         if weblogin.available():
             def on_done(cookie, auto):
                 _dump_nav_log(pan_key)
-                self._after_login(pan_key, cookie, auto)
+                _on_ui(lambda: self._after_login(pan_key, cookie, auto))
 
             def on_cancel():
                 _dump_nav_log(pan_key)
-                self._home_status(
-                    f"已返回（{pan['name']} 登录未保存）——随时可再点卡片登录")
+                _on_ui(lambda: self._home_status(
+                    f"已返回（{pan['name']} 登录未保存）——随时可再点卡片登录"))
 
             try:
                 weblogin.open_login(pan["login"], pan["auth_keys"],

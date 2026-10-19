@@ -39,6 +39,10 @@ class _Clock:
     def schedule_interval(fn, interval):
         pass
 
+    @staticmethod
+    def schedule_once(fn, timeout=0):
+        fn(0)
+
 
 clock_mod = types.ModuleType("kivy.clock")
 clock_mod.Clock = _Clock
@@ -327,8 +331,31 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本1.8.3",
-          mobile_main.SHELL_VERSION == "1.8.3", mobile_main.SHELL_VERSION)
+    check("壳-壳版本1.8.4",
+          mobile_main.SHELL_VERSION == "1.8.4", mobile_main.SHELL_VERSION)
+
+    # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
+    check("壳-按钮回调持Python强引用（防GC闪退）",
+          '"click_cbs"' in wsrc
+          and "click_back, click_done" in wsrc
+          and "btn_back.setOnClickListener(click_back)" in wsrc
+          and "btn_done.setOnClickListener(click_done)" in wsrc,
+          "pyjnius proxy 只存指针不持引用")
+    check("壳-Dialog显式全屏（防WebView高度塌陷）",
+          "setLayout(-1, -1)" in wsrc
+          and "dialog.show()" in wsrc
+          and wsrc.index("dialog.show()") < wsrc.index("setLayout(-1, -1)"),
+          "show 后 setLayout 全屏")
+    check("壳-渲染进程崩溃处理已接通（防杀）",
+          "onRenderProcessGone" in java_path.read_text(encoding="utf-8")
+          and "onRenderGone" in wsrc
+          and "_on_render_gone" in wsrc,
+          "onRenderProcessGone 返回 true + 自动关层")
+    check("壳-登录回调调度回Kivy主线程",
+          hasattr(mobile_main, "_on_ui")
+          and "Clock.schedule_once" in py_src)
+    mobile_main._on_ui(lambda: None)  # mock 下立即同步执行不炸
+    check("壳-_on_ui冒烟可调用", True)
 
     # ---- v1.8.3 Dialog 承载 + onPageStarted 导航观测 ----
     check("壳-登录层全屏Dialog承载（手势返回系统级）",

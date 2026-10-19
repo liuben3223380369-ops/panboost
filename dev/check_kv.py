@@ -110,7 +110,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "1.8.3", "壳版本未升级到 1.8.3"
+    assert m.SHELL_VERSION == "1.8.4", "壳版本未升级到 1.8.4"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -166,6 +166,22 @@ def main():
     assert "stopLoading" in wsrc, "onPageStarted 守卫未停载市场 URL"
     assert hasattr(weblogin, "nav_log"), "缺 nav_log 导出（真机诊断）"
     assert "_dump_nav_log" in msrc, "导航日志未落盘（诊断证据缺失）"
+
+    # v1.8.4 真机修复（v1.8.3 反馈"三色弹窗无内容 + 点击闪退"）：
+    # ① 闪退：_ClickListener 内联创建未持 Python 强引用——pyjnius
+    #    官方文档明确 proxy 只存指针不持引用，GC 后 Java 回调必崩
+    # ② 三色弹窗：floating 主题 Dialog 被 AOSP PhoneWindow 强制
+    #    setLayout(WRAP_CONTENT, WRAP_CONTENT)，WebView 高度塌陷 0
+    assert '"click_cbs"' in wsrc, "按钮点击回调未持强引用（GC 后闪退）"
+    assert "click_back, click_done" in wsrc, "两个按钮回调未存元组"
+    assert "setLayout(-1, -1)" in wsrc, \
+        "Dialog 未显式全屏（floating 主题默认 wrap，WebView 塌陷）"
+    assert "onRenderProcessGone" in jtxt, \
+        "桥接类缺渲染进程崩溃处理（默认杀整个 App）"
+    assert "onRenderGone" in jtxt and "onRenderGone" in wsrc, \
+        "渲染崩溃回调未接通 Python 侧"
+    assert "_on_ui" in msrc, "登录回调未调度回 Kivy 主线程（线程安全）"
+    assert "Clock.schedule_once" in msrc, "缺 Clock 主线程调度"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

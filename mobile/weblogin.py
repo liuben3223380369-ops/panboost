@@ -7,6 +7,21 @@
 
 设计要点：
 - 所有 Android UI 操作经 runOnUiThread 执行（Kivy 主线程非 UI 线程）
+- v1.8.4 修复真机"蓝灰黑三色弹窗无内容 + 点击闪退"：
+  ① 闪退：_ClickListener 此前内联创建未持 Python 强引用——pyjnius
+    官方文档明确 proxy 只存指针不持引用，CPython 引用计数归零立即
+    GC，Java 侧点击已死 proxy 必 native crash。现所有回调对象强
+    引用存 _STATE（click_cbs）
+  ② 三色弹窗：Dialog(activity) 用默认 floating 主题，AOSP
+    PhoneWindow.generateLayout()（2403-2407 行）会强制
+    setLayout(WRAP_CONTENT, WRAP_CONTENT)——窗口 wrap 后 WebView
+    高度塌陷成 0，只剩 160px 按钮栏（灰✕+蓝✓）和深色窗口背景
+    （黑）。现 show() 后显式 getWindow().setLayout(-1,-1) 全屏
+    （show 用 getAttributes() 注册窗口，此后 setLayout 直接改
+    注册参数对象立即生效；放在 setContentView 前会被覆盖）
+  ③ 加固：WebView 渲染进程崩溃（onRenderProcessGone）不处理时
+    系统默认杀整个 App——桥接类转发返回 true，Python 侧记日志
+    并自动关层
 - v1.8.3 全屏 Dialog 承载（根治"无法返回"）：
   Android 10+ 手势导航的返回手势不产生键盘事件，直接调 Activity
   onBackPressed()——此前 addContentView 覆盖层方案下，SDL trap=1
@@ -95,6 +110,7 @@ class _ClickListener(PythonJavaClass):
 _STATE = {"root": None, "webview": None, "dialog": None, "poller": None,
           "on_close": None, "on_cancel": None, "done": False,
           "client_cb": None, "key_cb": None, "cancel_cb": None,
+          "click_cbs": None,
           "nav_log": [],
           "closed": threading.Event()}
 
@@ -180,15 +196,19 @@ class _UrlLoadingCallback(PythonJavaClass):
       + 市场黑名单拦截（wv.stopLoading）——302 落地不经过
       shouldOverrideUrlLoading，这里是唯一可靠守卫点
     - onPageFinished 落日志（页面加载完成时间线）
+
+    v1.8.4 增补 onRenderGone：WebView 渲染进程崩溃转发——不处理
+    时系统默认杀掉整个 App（真机闪退路径之一）。
     """
     __javainterfaces__ = [
         "org/panboost/panwebview/PanWebViewClient$UrlLoadingCallback"]
     __javacontext__ = "app"
 
-    def __init__(self, handle, on_nav=None):
+    def __init__(self, handle, on_nav=None, on_render_gone=None):
         super().__init__()
         self._handle = handle
         self._on_nav = on_nav
+        self._on_render_gone = on_render_gone
 
     @java_method("(Ljava/lang/String;)Z")
     def onUrlLoading(self, url):
@@ -207,6 +227,14 @@ class _UrlLoadingCallback(PythonJavaClass):
         if self._on_nav is not None:
             try:
                 self._on_nav(url, started=False)
+            except Exception:
+                pass
+
+    @java_method("()V")
+    def onRenderGone(self):
+        if self._on_render_gone is not None:
+            try:
+                self._on_render_gone()
             except Exception:
                 pass
 
@@ -303,8 +331,12 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _step("返回按钮配色",
           lambda: (btn_back.setBackgroundColor(_jcolor(0xFF475569)),
                    btn_back.setTextColor(_jcolor(0xFFFFFFFF))), critical=False)
-    _step("返回按钮绑定点击", lambda: btn_back.setOnClickListener(
-        _ClickListener(on_cancel)))
+    # v1.8.4：点击回调必须存 Python 强引用——pyjnius 官方文档明确
+    # proxy 只存指针不持引用，内联创建引用计数归零立即被 GC，
+    # Java 侧点击已死 proxy 直接 native crash（真机"点击就闪退"根因）
+    click_back = _step("构造返回按钮点击回调",
+                       lambda: _ClickListener(on_cancel))
+    _step("返回按钮绑定点击", lambda: btn_back.setOnClickListener(click_back))
     _step("返回按钮入栏", lambda: bar.addView(
         btn_back, LLParams(0, 160, 1.0)))
 
@@ -314,8 +346,9 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _step("完成按钮配色",
           lambda: (btn_done.setBackgroundColor(_jcolor(0xFF2563EB)),
                    btn_done.setTextColor(_jcolor(0xFFFFFFFF))), critical=False)
-    _step("完成按钮绑定点击", lambda: btn_done.setOnClickListener(
-        _ClickListener(on_manual_done)))
+    click_done = _step("构造完成按钮点击回调",
+                       lambda: _ClickListener(on_manual_done))
+    _step("完成按钮绑定点击", lambda: btn_done.setOnClickListener(click_done))
     _step("完成按钮入栏", lambda: bar.addView(
         btn_done, LLParams(0, 160, 1.0)))
 
@@ -334,6 +367,9 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
         settings.setUserAgentString(DESKTOP_UA)
         settings.setUseWideViewPort(True)
         settings.setLoadWithOverviewMode(True)
+        # v1.8.4：网页加载前 WebView 默认黑底（真机深色窗口背景下
+        # 观感即"黑色空白"），设白底更接近网页观感
+        wv.setBackgroundColor(_jcolor(0xFFFFFFFF))
     _step("WebView基础配置", _cfg, critical=False)
 
     def _cookie():
@@ -377,8 +413,23 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
             except Exception:
                 pass
 
+    # v1.8.4 渲染进程崩溃处理：onRenderProcessGone 不处理时系统
+    # 默认杀掉整个 App（真机闪退路径之一）。记日志并自动关层
+    # （onRenderGone 在 UI 线程回调，runOnUiThread 在 UI 线程调用
+    # 时立即同步执行，dismiss 后 WebView 随层销毁）
+    def _on_render_gone():
+        log = _STATE["nav_log"]
+        log.append(("crash", time.strftime("%H:%M:%S"),
+                    "WebView渲染进程崩溃，已自动关闭登录层"))
+        del log[:-50]
+        try:
+            close_login()
+        except Exception:
+            pass
+
     client_cb = _step("构造导航回调",
-                      lambda: _UrlLoadingCallback(_handle_url, _on_nav))
+                      lambda: _UrlLoadingCallback(_handle_url, _on_nav,
+                                                  _on_render_gone))
     PanWebViewClient = _step(
         "加载PanWebViewClient类",
         lambda: autoclass("org.panboost.panwebview.PanWebViewClient"))
@@ -410,6 +461,14 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _step("挂载取消监听", lambda: dialog.setOnCancelListener(cancel_cb))
     _step("Dialog装载内容", lambda: dialog.setContentView(root))
     _step("显示Dialog", lambda: dialog.show())
+    # v1.8.4 关键修复：floating 主题的 Dialog 在 setContentView 时
+    # 被 PhoneWindow.generateLayout() 强制 setLayout(WRAP_CONTENT,
+    # WRAP_CONTENT)（AOSP 源码实锤）——窗口 wrap 后 WebView 高度
+    # 塌陷成 0，真机表象即"蓝灰黑三色弹窗、网页什么都没有"。
+    # show() 后显式全屏：show 用 getAttributes() 注册窗口，此后
+    # setLayout 直接改注册参数对象，立即生效
+    _step("Dialog全屏", lambda: dialog.getWindow().setLayout(-1, -1),
+          critical=False)
 
     _STATE["root"] = root
     _STATE["webview"] = wv
@@ -417,6 +476,7 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _STATE["client_cb"] = client_cb
     _STATE["key_cb"] = key_cb
     _STATE["cancel_cb"] = cancel_cb
+    _STATE["click_cbs"] = (click_back, click_done)
     _STATE["closed"].clear()
 
 
@@ -453,6 +513,7 @@ def _ui_close():
         _STATE["client_cb"] = None
         _STATE["key_cb"] = None
         _STATE["cancel_cb"] = None
+        _STATE["click_cbs"] = None
         _STATE["closed"].set()
 
 
@@ -524,6 +585,7 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
             _STATE["webview"] = None
             _STATE["dialog"] = None
             _STATE["cancel_cb"] = None
+            _STATE["click_cbs"] = None
             _STATE["closed"].set()
         poller = _STATE["poller"]
         if poller is not None:
@@ -645,6 +707,7 @@ def close_login():
         _STATE["webview"] = None
         _STATE["dialog"] = None
         _STATE["cancel_cb"] = None
+        _STATE["click_cbs"] = None
         _STATE["closed"].set()
     cb = _STATE.get("on_cancel")
     _STATE["on_cancel"] = None

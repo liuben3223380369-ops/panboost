@@ -6,14 +6,15 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 1.8.3
+version = 1.8.4
 
 requirements = python3,kivy,certifi,pyjnius
 
-# v1.8.2 导航守卫 + v1.8.3 onPageStarted 导航观测：Java 桥接类
-# （pyjnius 只能实现接口，不能继承 WebViewClient 抽象类）——
-# shouldOverrideUrlLoading 拦截 intent://market:// 等一切非
-# http/https 导航；onPageStarted 拦截 302 落地的应用市场页
+# v1.8.2 导航守卫 + v1.8.3 onPageStarted 导航观测 + v1.8.4 渲染
+# 进程崩溃处理（onRenderProcessGone，不处理时系统杀整个 App）：
+# Java 桥接类（pyjnius 只能实现接口，不能继承 WebViewClient
+# 抽象类）——shouldOverrideUrlLoading 拦截 intent://market:// 等
+# 一切非 http/https 导航；onPageStarted 拦截 302 落地的应用市场页
 # （前者对服务端 302 重定向无效，Android 官方文档明确）
 android.add_src = java_classes/PanWebViewClient.java
 
