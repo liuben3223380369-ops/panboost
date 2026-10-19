@@ -7,7 +7,11 @@ share:     分享链接域名特征（引擎 resolve_share 识别用）
 """
 
 PANS = [
-    {"key": "baidu", "name": "百度网盘", "login": "https://pan.baidu.com/",
+    {"key": "baidu", "name": "百度网盘",
+     # PC 版统一登录页：pan.baidu.com 的 H5 壳内嵌 100ms 延迟强制
+     # 跳转脚本（location.href 跳"下载客户端"），即使桌面 UA 也会
+     # 先落 H5 再跳（v1.8.2 调研实测）；passport 登录态与网盘同域
+     "login": "https://passport.baidu.com/v2/?login",
      "domains": ["baidu.com"], "auth_keys": ["BDUSS"],
      "share": ["pan.baidu.com/s/"]},
     {"key": "quark", "name": "夸克网盘", "login": "https://pan.quark.cn/",

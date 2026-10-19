@@ -13,8 +13,10 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
-sys.path.insert(0, str(HERE))
+# HERE 必须排在 ROOT 之前（后 insert 的在最前）——若仓库根存在同名
+# 旧残留 test_server.py 会被优先导入（曾致 138/2 假失败）
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(HERE))
 from test_server import TestServer
 
 PB = [sys.executable, str(ROOT / "panboost.py")]

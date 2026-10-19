@@ -64,7 +64,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.8.1-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.8.2-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -77,12 +77,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.1 修复版）。' '修复真机两大问题：①网盘卡片点开的是"下载客户端"引导页——登录页现在以桌面模式加载，直接显示网页登录入口；②登录页无法返回——支持手机返回键/手势（网页可后退则后退，再按返回首页），顶部新增 ✕ 返回首页 / ✓ 完成登录 双按钮。' 'v1.8.0 功能全量包含：分享链接直接下载（蓝奏云/123云盘免登录，夸克网盘需先登录），多文件分享自动批量下载、支持提取码（链接后加 ?code=xxxx）。' '浅色界面；首页 18 家国内外网盘入口，登录 Cookie 永久保存、下载自动携带；前台服务保活锁屏不断流。' '异常请取应用目录 crash-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v1.8.1"
+          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.2 根治版）。' '经源码级联网调研定位 v1.8.1 修复无效的真正根因，本次根治：①"点卡片跳到下载网盘APP界面"——WebView 未设 WebViewClient，页面 intent://market:// 跳转全部逃逸到系统应用市场；现已装导航守卫（Java 桥接类）只放行 http/https，百度改用 PC 版统一登录页 passport.baidu.com（原入口有 100ms 延迟强制跳转脚本）。' '②"登录页无法返回、返回手势无效"——三层修复：SDL 返回键 trap（此前返回键根本不产生键盘事件）+ WebView 层返回键拦截（网页可后退先后退，再按关闭登录层）+ 顶部 ✕ 返回首页 / ✓ 完成登录 双按钮。' 'v1.8.0 功能全量包含：分享链接直接下载（蓝奏云/123云盘免登录，夸克网盘需先登录），多文件分享自动批量下载、支持提取码（链接后加 ?code=xxxx）。' '首页 18 家国内外网盘入口，登录 Cookie 永久保存、下载自动携带；前台服务保活锁屏不断流。' '异常请取应用目录 crash-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v1.8.2"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.1" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.2" --latest --notes-file "$NOTES_FILE"
           fi
 '''
 

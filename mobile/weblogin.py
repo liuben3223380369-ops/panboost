@@ -8,8 +8,15 @@
 设计要点：
 - 所有 Android UI 操作经 runOnUiThread 执行（Kivy 主线程非 UI 线程）
 - 桌面 UA 加载（v1.8.1）：移动 UA 会被网盘 302 到"下载客户端"页
-- 顶部双按钮：✕ 返回首页（放弃登录）/ ✓ 完成登录（提取 Cookie）；
-  返回键/手势走 request_back()（网页后退→关闭登录层）
+- v1.8.2 导航守卫：WebViewClient（Java 桥接类 PanWebViewClient，
+  经 android.add_src 编入 APK）拦截一切非 http/https 导航——
+  intent://market://tmast:// 等是"跳到下载App界面"的逃逸通道，
+  无 client 时页面 location.href 跳转全部交给系统 intent 分发
+- v1.8.2 返回键：WebView 抢焦点后自己消费 KEYCODE_BACK，
+  View$OnKeyListener（接口，pyjnius 可直接实现）在 WebView 层拦截；
+  无焦点时由 Kivy Window.on_keyboard(27) 兜底（需 SDL trap，见
+  main.py）
+- 顶部双按钮：✕ 返回首页（放弃登录）/ ✓ 完成登录（提取 Cookie）
 - 后台线程轮询 CookieManager，特征键命中自动关闭并回调
 - 任何一步失败抛 WebLoginError，调用方回退到手动粘贴 Cookie 路径
 - 非 Android 环境下 available() 为 False，纯 Python 逻辑可 mock 测试
@@ -82,6 +89,7 @@ class _ClickListener(PythonJavaClass):
 
 _STATE = {"root": None, "webview": None, "poller": None,
           "on_close": None, "on_cancel": None, "done": False,
+          "client_cb": None, "key_cb": None,
           "closed": threading.Event()}
 
 
@@ -98,7 +106,99 @@ def _jcolor(argb):
     return argb - 0x100000000 if argb >= 0x80000000 else argb
 
 
-def _ui_open(url, title, on_manual_done, on_cancel):
+def _decide_url(url, parse_intent=None):
+    """WebView 导航策略（纯函数，离线可测）。
+
+    返回 (block, load_url)：
+    - http/https → (False, None) 放行 WebView 正常加载
+    - intent:// 且提供 parse_intent → 解析出 http(s) 的
+      browser_fallback_url 则 (True, fallback)（拦截原跳转、
+      在 WebView 内加载 fallback 网页——Chrome 的标准约定）
+    - 其余（market:// tmast:// appmarket:// 微信/网盘私有 scheme、
+      file:// javascript: about: 空 URL…）→ (True, None) 一律拦截
+      ——这正是"跳到下载网盘APP界面"的逃逸通道。
+
+    依据：Android 官方文档——无 WebViewClient 时页面发起的导航交给
+    系统 Activity Manager 分发（应用市场/网盘App 接管）。
+    """
+    if not url:
+        return (True, None)
+    u = url.strip()
+    if u.startswith(("http://", "https://")):
+        return (False, None)
+    if u.startswith("intent://") and parse_intent is not None:
+        try:
+            fb = parse_intent(u)
+        except Exception:
+            fb = None
+        if fb and str(fb).startswith(("http://", "https://")):
+            return (True, str(fb))
+    return (True, None)
+
+
+def _parse_intent_uri(url):
+    """解析 intent:// URI 取 browser_fallback_url（真机路径）。
+
+    安全加固：addCategory(BROWSABLE) + setComponent(None) +
+    setSelector(None)，防 intent scheme hijacking（页面定向拉起
+    App 私有组件）。
+    """
+    if not _JNIUS_OK:
+        return None
+    Intent = autoclass("android.content.Intent")
+    i = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+    i.addCategory(Intent.CATEGORY_BROWSABLE)
+    i.setComponent(None)
+    i.setSelector(None)
+    return i.getStringExtra("browser_fallback_url")
+
+
+class _UrlLoadingCallback(PythonJavaClass):
+    """实现 Java 桥接类 PanWebViewClient$UrlLoadingCallback（接口）。
+
+    pyjnius 基于 java.lang.reflect.Proxy 只能实现接口，WebViewClient
+    是抽象类——所以经 Java 桥接类转发（见 java_classes/）。
+    """
+    __javainterfaces__ = [
+        "org/panboost/panwebview/PanWebViewClient$UrlLoadingCallback"]
+    __javacontext__ = "app"
+
+    def __init__(self, handle):
+        super().__init__()
+        self._handle = handle
+
+    @java_method("(Ljava/lang/String;)Z")
+    def onUrlLoading(self, url):
+        return bool(self._handle(url))
+
+
+class _BackKeyListener(PythonJavaClass):
+    """WebView 层返回键拦截（View$OnKeyListener 是接口，可直接实现）。
+
+    WebView 抢到焦点后 KEYCODE_BACK 默认被 WebView 消费（goBack），
+    不会经过 SDL surface——Kivy 层拦不到，必须在 WebView 层挂监听。
+    """
+    __javainterfaces__ = ["android/view/View$OnKeyListener"]
+
+    def __init__(self, on_back):
+        super().__init__()
+        self._on_back = on_back
+
+    @java_method("(Landroid/view/View;ILandroid/view/KeyEvent;)Z")
+    def onKey(self, view, key_code, event):
+        # KEYCODE_BACK=4；ACTION_UP=1 时处理（DOWN+UP 只触发一次）。
+        # onKey 在 UI 线程回调——on_back 内部必须同步操作 WebView，
+        # 绝不能 _run_ui 同步等待（死锁）
+        if key_code == 4 and event.getAction() == 1:
+            try:
+                self._on_back()
+            except Exception:
+                pass
+            return True  # 消费：阻止 WebView goBack / 系统默认退出
+        return False
+
+
+def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     """在 UI 线程挂载覆盖层：[完成登录按钮 + WebView] 全屏。
 
     分步执行并标记失败步骤（真机诊断）：关键步骤失败抛
@@ -185,6 +285,35 @@ def _ui_open(url, title, on_manual_done, on_cancel):
             pass
     _step("CookieManager配置", _cookie, critical=False)
 
+    # v1.8.2 导航守卫：必须设置 WebViewClient（否则页面 location.href
+    # / intent:// / market:// 导航全部逃逸到系统 intent 分发——真机
+    # "跳到下载网盘APP界面"根因）。回调对象强引用存 _STATE 防 GC
+    # （pyjnius 文档：proxy 被 Python GC 后 Java 回调崩溃）
+    def _handle_url(u):
+        block, load = _decide_url(u, _parse_intent_uri)
+        if load:
+            try:
+                wv.loadUrl(load)
+            except Exception:
+                pass
+        return block
+
+    client_cb = _step("构造导航回调", lambda: _UrlLoadingCallback(_handle_url))
+    PanWebViewClient = _step(
+        "加载PanWebViewClient类",
+        lambda: autoclass("org.panboost.panwebview.PanWebViewClient"))
+    client = _step("构造WebViewClient",
+                   lambda: PanWebViewClient(client_cb))
+    _step("设置WebViewClient", lambda: wv.setWebViewClient(client))
+
+    # v1.8.2 返回键：WebView 抢焦点后自己消费 KEYCODE_BACK，必须在
+    # View 层挂 OnKeyListener 拦截
+    key_cb = _step("构造返回键监听", lambda: _BackKeyListener(on_key_back))
+    _step("WebView可获焦点",
+          lambda: (wv.setFocusable(True),
+                   wv.setFocusableInTouchMode(True)), critical=False)
+    _step("挂载返回键监听", lambda: wv.setOnKeyListener(key_cb))
+
     _step("加载登录页", lambda: wv.loadUrl(url))
     _step("WebView入容器", lambda: root.addView(wv, LayoutParams(-1, -1)))
     _step("挂载到窗口", lambda: activity.addContentView(
@@ -192,6 +321,8 @@ def _ui_open(url, title, on_manual_done, on_cancel):
 
     _STATE["root"] = root
     _STATE["webview"] = wv
+    _STATE["client_cb"] = client_cb
+    _STATE["key_cb"] = key_cb
     _STATE["closed"].clear()
 
 
@@ -207,6 +338,8 @@ def _ui_close():
     finally:
         _STATE["root"] = None
         _STATE["webview"] = None
+        _STATE["client_cb"] = None
+        _STATE["key_cb"] = None
         _STATE["closed"].set()
 
 
@@ -291,6 +424,20 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
         # ✕ 返回首页按钮：放弃登录（不提取 Cookie，不触发 on_done）
         close_login()
 
+    def _key_back():
+        # WebView 层返回键/手势（onKey 在 UI 线程回调，必须同步操作，
+        # 不能 _run_ui 同步等待——probe 会排到 onKey 之后造成死等）：
+        # 网页可后退先 goBack，否则关闭登录层。close_login 内部的
+        # _run_ui 是异步 post（onKey 返回后执行），安全。
+        wv = _STATE["webview"]
+        try:
+            if wv is not None and wv.canGoBack():
+                wv.goBack()
+                return
+        except Exception:
+            pass
+        _cancel()
+
     # UI 层挂载结果必须确认回传：runOnUiThread 是异步 post，异常不会
     # 传播回调用方——v1.7.0 的 fire-and-forget 让挂载失败完全静默，
     # 表象即"点击卡片无反应"。
@@ -303,7 +450,7 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
             if aborted:
                 return  # 等待期已判超时失败，不再挂载（防幽灵层）
             _ui_open(url, title, lambda: _finish(False),
-                     lambda: _cancel())
+                     lambda: _cancel(), _key_back)
             if aborted:
                 # 极小窗口：挂载完成才发现已被判超时 → 立即撤下
                 try:

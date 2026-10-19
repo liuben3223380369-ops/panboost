@@ -291,6 +291,45 @@ def main():
     check("壳-非返回键不拦截",
           app._on_key(None, 13) is False)
 
+    # ---- v1.8.2 导航守卫 + WebView 返回键 + SDL trap ----
+    check("壳-导航白名单_decide_url行为",
+          _wl._decide_url("https://pan.baidu.com/") == (False, None)
+          and _wl._decide_url("http://x/") == (False, None)
+          and _wl._decide_url("market://details?id=x") == (True, None)
+          and _wl._decide_url("tmast://appdetail") == (True, None)
+          and _wl._decide_url("") == (True, None)
+          and _wl._decide_url("weixin://x") == (True, None))
+    check("壳-intent带fallback时转加载网页",
+          _wl._decide_url(
+              "intent://scan/#Intent;scheme=zxing;"
+              "S.browser_fallback_url=https%3A%2F%2Fm.baidu.com%2F;end",
+              parse_intent=lambda u: "https://m.baidu.com/")
+          == (True, "https://m.baidu.com/")
+          and _wl._decide_url("intent://x/#Intent;end",
+                              parse_intent=lambda u: None) == (True, None))
+    check("壳-WebViewClient导航守卫已接入",
+          "setWebViewClient" in wsrc and "PanWebViewClient" in wsrc
+          and "_UrlLoadingCallback" in wsrc
+          and "browser_fallback_url" in wsrc,
+          "Java桥接类+Python回调")
+    check("壳-WebView层返回键监听已挂",
+          "setOnKeyListener" in wsrc and "_BackKeyListener" in wsrc
+          and "setFocusable" in wsrc)
+    java_path = Path(mobile_main.__file__).parent / "java_classes" \
+        / "PanWebViewClient.java"
+    check("壳-Java桥接类存在且覆写双签名",
+          java_path.exists()
+          and "extends WebViewClient" in java_path.read_text(encoding="utf-8")
+          and java_path.read_text(encoding="utf-8").count(
+              "shouldOverrideUrlLoading") >= 2)
+    check("壳-SDL返回键trap已开启",
+          os.environ.get("SDL_ANDROID_TRAP_BACK_BUTTON") == "1")
+    check("壳-百度改用PC统一登录页",
+          mobile_main.PAN_BY_KEY["baidu"]["login"]
+          == "https://passport.baidu.com/v2/?login")
+    check("壳-壳版本1.8.2",
+          mobile_main.SHELL_VERSION == "1.8.2", mobile_main.SHELL_VERSION)
+
     # ---- 首页宫格 ----
     grid = app._scr("home").ids.pan_grid
     check("壳-宫格卡片数等于网盘数", len(grid.children) == len(pans),

@@ -110,7 +110,38 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "1.8.1", "壳版本未升级到 1.8.1"
+    assert m.SHELL_VERSION == "1.8.2", "壳版本未升级到 1.8.2"
+
+    # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
+    # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
+    # 无 client 时 intent://market:// 导航逃逸到系统；百度 H5 壳有
+    # 100ms 延迟强制跳转脚本）
+    java_path = ROOT / "mobile" / "java_classes" / "PanWebViewClient.java"
+    assert java_path.exists(), "缺 Java 桥接类 PanWebViewClient.java"
+    jtxt = java_path.read_text(encoding="utf-8")
+    assert "extends WebViewClient" in jtxt, "桥接类未继承 WebViewClient"
+    assert jtxt.count("shouldOverrideUrlLoading") >= 2, \
+        "桥接类未覆写双签名 shouldOverrideUrlLoading"
+    assert "UrlLoadingCallback" in jtxt, "桥接类缺回调接口"
+    spec = (ROOT / "mobile" / "buildozer.spec").read_text(encoding="utf-8")
+    assert "android.add_src" in spec and "PanWebViewClient.java" in spec, \
+        "spec 未把 Java 桥接类编入 APK（android.add_src）"
+    assert "setWebViewClient" in wsrc, "未设置 WebViewClient（导航逃逸根因）"
+    assert "setOnKeyListener" in wsrc, "WebView 未挂返回键监听（抢焦点）"
+    assert "_UrlLoadingCallback" in wsrc, "缺导航回调 Python 实现"
+    assert "_BackKeyListener" in wsrc, "缺 WebView 返回键监听实现"
+    assert "browser_fallback_url" in wsrc, "intent:// 缺 fallback 解析"
+    assert "_decide_url" in wsrc, "缺导航白名单策略 _decide_url"
+    ok1, _ = weblogin._decide_url("https://pan.baidu.com/")
+    ok2, _ = weblogin._decide_url("market://details?id=x")
+    ok3, _ = weblogin._decide_url("")
+    assert not ok1 and ok2 and ok3, "_decide_url 行为异常"
+    assert "SDL_ANDROID_TRAP_BACK_BUTTON" in msrc, \
+        "未开启 SDL 返回键 trap（Kivy 收不到 keycode 27 根因）"
+    assert msrc.index("SDL_ANDROID_TRAP_BACK_BUTTON") < msrc.index(
+        "import panboost"), "SDL trap 必须在引擎 import 之前设置"
+    assert m.PAN_BY_KEY["baidu"]["login"] == \
+        "https://passport.baidu.com/v2/?login", "百度未用 PC 统一登录页"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.8.1。
+"""PanBoost Android 图形壳（Kivy）v1.8.2。
+
+v1.8.2（联网研究根治版）：v1.8.1 的桌面 UA 修复无效，经源码级调研
+定位真正根因——
+①"跳到下载网盘APP界面"：WebView 未设置 WebViewClient，页面
+  location.href / intent:// / market:// 导航全部逃逸到系统 intent
+  分发（应用市场/网盘App 接管）；百度 H5 壳更有 100ms 延迟的强制
+  跳转脚本（即使桌面 UA 也先落 H5 再跳）。修复：Java 桥接类
+  PanWebViewClient（android.add_src 编入 APK，pyjnius 只能实现
+  接口不能继承 WebViewClient 抽象类）+ 导航白名单（只放行
+  http/https，intent:// 解析 browser_fallback_url）；百度入口改
+  PC 版统一登录页 passport.baidu.com/v2/?login。
+②返回键/手势无效：SDL_HINT_ANDROID_TRAP_BACK_BUTTON 默认 "0"，
+  返回键根本不产生 SDL 事件（Kivy 收不到 27）；且 WebView 抢焦点
+  后自己消费 KEYCODE_BACK。修复：SDL trap 环境变量（main.py 首段，
+  必须早于任何 kivy import）+ WebView 层 View$OnKeyListener 拦截
+  （网页后退→关闭登录层）+ Kivy Window.on_keyboard(27) 兜底。
 
 v1.8.1：修复真机两大反馈——①网盘卡片点开的是"下载客户端"引导页
 （WebView 缺桌面 UA，被网盘 302）；②登录层无法返回（Android 返回
@@ -37,6 +53,16 @@ import time
 import urllib.parse
 from pathlib import Path
 
+# Android 返回键修复（v1.8.2，必须在任何 kivy/SDL import 之前）：
+# SDL_HINT_ANDROID_TRAP_BACK_BUTTON 默认 "0"——返回键由系统处理
+# （默认退出 App），根本不产生 SDL 键盘事件，Kivy 的
+# Window.on_keyboard 永远收不到 keycode 27。设为 "1" 后返回键产生
+# SDL_KEYDOWN(SDL_SCANCODE_AC_BACK)，Kivy 映射为 27 传入 on_keyboard
+# （android.map_key 在现代 p4a 已移除，映射内置在 Kivy window_sdl2）。
+# SDL 对该 hint 是运行时查询（每次按键时读进程环境变量），CPython
+# 的 os.environ 赋值同步 putenv 到 C 层，同进程 SDL 可见。
+os.environ.setdefault("SDL_ANDROID_TRAP_BACK_BUTTON", "1")
+
 # PANBOOST_HOME 必须在 import panboost 之前设置（CONFIG_DIR 是模块级求值）
 IS_ANDROID = ("ANDROID_PRIVATE" in os.environ
               or "ANDROID_ARGUMENT" in os.environ)
@@ -55,7 +81,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.8.1"
+SHELL_VERSION = "1.8.2"
 
 
 def register_font():

@@ -6,9 +6,14 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 1.8.1
+version = 1.8.2
 
 requirements = python3,kivy,certifi,pyjnius
+
+# v1.8.2 WebView 导航守卫：Java 桥接类（pyjnius 只能实现接口，
+# 不能继承 WebViewClient 抽象类）——拦截 intent://market:// 等一切
+# 非 http/https 导航（真机"跳到下载网盘APP界面"根因）
+android.add_src = java_classes/PanWebViewClient.java
 
 # 固定 p4a 到稳定 release（hostpython 3.11.5）；master 的 hostpython
 # 3.14.2 会让纯依赖解析拉 cp314 android wheel → 平台不兼容报错

@@ -204,19 +204,23 @@ python panboost.py download "直链" --cookie "..." -o ~/storage/downloads/movie
 
 ### 方式二：图形界面 APP（APK）
 
-仓库 `mobile/` 内置 Kivy 图形壳（v1.8.1 修复真机登录页跳转与返回
+仓库 `mobile/` 内置 Kivy 图形壳（v1.8.2 根治真机登录页跳转与返回
 问题；v1.7.0 起浅色主题界面；v1.6.1 起自带中文字体，无乱码；
 v1.6.2 修复启动闪退），四屏界面：
 
 - **首页**：18 家国内外网盘入口宫格（百度/夸克/阿里/微云/天翼/移动/
   迅雷/123/蓝奏/坚果/UC/Google Drive/Dropbox/OneDrive/MEGA/pCloud/
   Box/Yandex）。点击卡片打开网盘官方登录页（原生 WebView **桌面模式**
-  加载——v1.8.0 及更早用移动 UA 会被多数网盘 302 到"下载客户端"
-  引导页，v1.8.1 修复；验证码/短信/扫码均原生支持），登录后自动提取
+  加载；v1.8.2 起加装 **WebViewClient 导航守卫**——只放行 http/https，
+  拦截 `intent://`、`market://` 等一切跳应用市场/网盘App 的逃逸导航，
+  这才是"点卡片跳到下载App界面"的真正根因；百度另改用 PC 版统一
+  登录页 `passport.baidu.com/v2/?login`，避开其 H5 壳的 100ms 强制
+  跳转脚本。验证码/短信/扫码均原生支持），登录后自动提取
   Cookie **永久保存**，下载对应网盘文件自动携带；已登录网盘显示
   "已登录"徽标；登录层顶部有 **✕ 返回首页 / ✓ 完成登录** 双按钮，
-  **手机返回键/手势**可用（网页可后退时先后退，再按返回 App 首页，
-  其他屏按返回键回首页）
+  **手机返回键/手势**可用——三层保障：SDL 返回键 trap（v1.8.2 前返回
+  键根本不产生键盘事件）+ WebView 层返回键拦截（网页可后退先后退，
+  再按关闭登录层）+ Kivy 层兜底（其他屏按返回键回首页）
 - **下载**：URL 输入（**直链或分享链接**——蓝奏/123 免登录解析，
   夸克自动带已登录 Cookie，多文件分享批量下载、可中途停止）、Cookie
   输入（留空自动匹配已登录网盘）、线程选择（auto 实测，手动 8~1024；
@@ -368,7 +372,8 @@ download <URL>
 | 文件 | 说明 |
 |---|---|
 | `panboost.py` | 主程序（唯一需要的文件；v1.8.0 起内置蓝奏/123/夸克分享链接解析器） |
-| `mobile/` | Android 图形壳：`main.py` 界面逻辑、`pans.py` 网盘清单（数据）、`theme.py` 浅色色板、`weblogin.py` WebView 登录、`service_down.py` 前台保活服务 |
+| `mobile/` | Android 图形壳：`main.py` 界面逻辑、`pans.py` 网盘清单（数据）、`theme.py` 浅色色板、`weblogin.py` WebView 登录、`java_classes/PanWebViewClient.java` WebView 导航守卫（Java 桥接类，`android.add_src` 编入 APK）、`service_down.py` 前台保活服务 |
+| `dev/RESEARCH_WEBVIEW_LOGIN.md` | WebView 登录页跳转/返回键问题的源码级调研报告（v1.8.2 修复依据，含 25 条来源） |
 | `test_server.py` | 测试用本地HTTP服务器（Range/限流/429+Retry-After/重定向/Cookie校验/JS挑战页/RST重置/混沌故障/拥塞排队/并发统计） |
 | `tests/` | 测试套件：`test_panboost.py` 功能测试（132项，`python3 tests/test_panboost.py` 运行）、`stress_test.py` 压力测试、`test_server.py` 本地测试服务器 |
 | `dev/` | 开发工具：`check_kv.py` CI界面门禁、`smoke_mobile.py` 移动壳冒烟、`demo_aimd.py` 1024线程AIMD演练 |
