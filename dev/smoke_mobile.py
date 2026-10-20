@@ -274,8 +274,9 @@ def main():
           and "setUserAgentString(DESKTOP_UA)" in wsrc
           and "setUseWideViewPort" in wsrc,
           _wl.DESKTOP_UA[:56] + "…")
-    check("壳-登录层✕返回与✓完成双按钮",
-          "✕ 返回首页" in wsrc and "✓ 完成登录" in wsrc
+    check("壳-登录层✕关闭与完成登录按钮（v1.9.0 标准布局）",
+          '"✕"' in wsrc and "已完成登录，保存 Cookie" in wsrc
+          and " · 网页登录" in wsrc
           and hasattr(_wl, "close_login")
           and hasattr(_wl, "request_back")
           and "canGoBack" in wsrc)
@@ -331,14 +332,14 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本1.8.5",
-          mobile_main.SHELL_VERSION == "1.8.5", mobile_main.SHELL_VERSION)
+    check("壳-壳版本1.9.0",
+          mobile_main.SHELL_VERSION == "1.9.0", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
           '"click_cbs"' in wsrc
-          and "click_back, click_done" in wsrc
-          and "btn_back.setOnClickListener(click_back)" in wsrc
+          and "click_close, click_done" in wsrc
+          and "tv_close.setOnClickListener(click_close)" in wsrc
           and "btn_done.setOnClickListener(click_done)" in wsrc,
           "pyjnius proxy 只存指针不持引用")
     check("壳-Dialog显式全屏（防WebView高度塌陷）",
@@ -391,6 +392,50 @@ def main():
           mobile_main.PAN_BY_KEY["tianyi"]["auth_keys"]
           and "ESTSAUTH" in mobile_main.PAN_BY_KEY["onedrive"]["auth_keys"],
           "夸克/UC=__pus+__puus；天翼=COOKIE_LOGIN_USER；OneDrive=ESTSAUTH")
+
+    # ---- v1.9.0 修复"三色块无字 + 夸克/阿里下载页 + UC 打不开" ----
+    check("壳-文字三级保险（真机按钮无字根因）",
+          "def _set_text" in wsrc
+          and 'autoclass("java.lang.String")' in wsrc,
+          "setText 重载解析失败时走 Java String 对象通道")
+    check("壳-文字颜色双保险",
+          "def _set_text_color" in wsrc and "Color.rgb" in wsrc,
+          "int 直传失败时 Color.rgb 同类型回传")
+
+    class _V:
+        def __init__(self, fail=False):
+            self.txt = None
+            self.fail = fail
+
+        def setText(self, t):
+            if self.fail:
+                raise RuntimeError("no such method")
+            self.txt = t
+    v_ok = _V()
+    check("壳-_set_text一级直传生效",
+          _wl._set_text(v_ok, "测试") is True and v_ok.txt == "测试")
+    check("壳-_set_text全失败返回False",
+          _wl._set_text(_V(fail=True), "测试") is False,
+          "非Android下二级通道不可用→False（真机二级通道生效）")
+    check("壳-标准登录页布局（标题栏+提示条+底部大按钮）",
+          "C_BAR_BG" in wsrc and " · 网页登录" in wsrc
+          and "在下方页面登录账号" in wsrc
+          and "已完成登录，保存 Cookie" in wsrc
+          and "C_DONE_BG" in wsrc,
+          "消灭'三个色块不知道是什么'")
+    check("壳-桌面UA读回验证（下载页根因诊断）",
+          "getUserAgentString" in wsrc
+          and "setUserAgentString(DESKTOP_UA)" in wsrc,
+          "UA 曾与整块配置一起被吞，现独立设置+验证记 nav_log")
+    check("壳-登录URL实锤修正（LinkSwift @match）",
+          mobile_main.PAN_BY_KEY["alipan"]["login"]
+          == "https://www.alipan.com/drive/"
+          and mobile_main.PAN_BY_KEY["tianyi"]["login"]
+          == "https://cloud.189.cn/web/"
+          and mobile_main.PAN_BY_KEY["yidong"]["login"]
+          == "https://yun.139.com/"
+          and "139.com" in mobile_main.PAN_BY_KEY["yidong"]["domains"],
+          "阿里 /drive、天翼 /web、移动 yun.139.com")
 
     # ---- v1.8.3 Dialog 承载 + onPageStarted 导航观测 ----
     check("壳-登录层全屏Dialog承载（手势返回系统级）",

@@ -7,6 +7,24 @@
 
 设计要点：
 - 所有 Android UI 操作经 runOnUiThread 执行（Kivy 主线程非 UI 线程）
+- v1.9.0 登录层 UI 重构 + 网页版 URL 实锤（真机反馈第六轮）：
+  ① "顶部三个色块没有文字"：✕/✓ 双按钮的 setText/setTextColor
+    与整块 WebView 配置一样走 critical=False——pyjnius 对 setText
+    多重载（int/CharSequence/char[]）解析在部分真机失败，失败被
+    静默吞掉，用户只看到两个色块不知是什么。重构为标准登录页
+    布局：深色标题栏（✕ + "网盘名 · 网页登录"）+ 黄色提示条 +
+    WebView + 底部通栏"已完成登录"大按钮（蓝底白字 17sp）；
+    文字三级保险 _set_text（str 直传 → java.lang.String 对象 →
+    失败记 nav_log），颜色 _set_text_color 双保险（int 直传 →
+    Color.rgb 回退）
+  ② "夸克/阿里云盘打开是下载页"：登录 URL 落在产品宣传页——
+    LinkSwift v1.1.4 @match 清单实锤网页版真实路径：阿里
+    www.alipan.com/drive/、天翼 cloud.189.cn/web/、移动云盘
+    yun.139.com（pans.py 修正，移动 domains 补 139.com）；
+    桌面 UA 原与整块 _cfg 一起被吞——配置拆分独立 step +
+    getUserAgentString 读回验证记 nav_log（真机可诊断）
+  ③ "UC 不能打开"：drive.uc.cn 域名经 LinkSwift @match 与 AList
+    驱动文档双源确认无误，问题同②（UA/拦截链路），随②根治
 - v1.8.5 修复"点击卡片即被误记已登录 + 部分网盘三色区域无内容"：
   ① 误记已登录：✓ 完成登录此前只看"Cookie 非空"——登录页游客
     Cookie（BAIDUID 等）也非空，一点就记账（真机反馈实锤）。
@@ -77,6 +95,13 @@ except Exception:  # 非 Android / 无 pyjnius：占位保证类定义可加载
 DESKTOP_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+# v1.9.0 登录层配色（集中管理，全部经 _jcolor 转 Java int）
+C_BAR_BG = 0xFF0F172A    # 标题栏：深石板蓝黑
+C_TIP_BG = 0xFFFEF3C7    # 提示条：浅黄
+C_TIP_FG = 0xFF92400E    # 提示条文字：深棕（浅黄底高对比）
+C_DONE_BG = 0xFF2563EB   # 完成按钮：主题蓝
+C_WHITE = 0xFFFFFFFF     # 白字（标题栏/按钮）
 
 
 class WebLoginError(Exception):
@@ -180,6 +205,49 @@ def _jcolor(argb):
     OverflowError——v1.7.0 真机"网盘卡片点击无反应"根因之一。
     """
     return argb - 0x100000000 if argb >= 0x80000000 else argb
+
+
+def _set_text(view, text):
+    """TextView 文字三级保险（v1.9.0 真机"按钮无字色块"根因修复）。
+
+    pyjnius 方法解析对 setText 多重载（int/CharSequence/char[]）
+    在部分真机 ROM 匹配失败，且 _step(critical=False) 会把失败
+    静默吞掉——真机表象即"顶部色块没有文字"。三级尝试：
+    ① str 直传（绝大多数环境 OK）
+    ② java.lang.String 对象（Java 侧类型精确，绕过重载解析）
+    ③ 返回 False，调用方记 nav_log（真机可诊断）
+    """
+    try:
+        view.setText(text)
+        return True
+    except Exception:
+        pass
+    try:
+        view.setText(autoclass("java.lang.String")(text))
+        return True
+    except Exception:
+        pass
+    return False
+
+
+def _set_text_color(view, argb):
+    """文字颜色双保险：int 直传失败时用 Color.rgb(r,g,b)（返回
+    Java int 值，同类型回传，无 Python int ↔ Java int 溢出转换）。
+
+    argb 为 0xFFrrggbb 字面量（_jcolor 只在直传分支内转换）。
+    """
+    try:
+        view.setTextColor(_jcolor(argb))
+        return True
+    except Exception:
+        pass
+    try:
+        r, g, b = (argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF
+        Color = autoclass("android.graphics.Color")
+        view.setTextColor(Color.rgb(r, g, b))
+        return True
+    except Exception:
+        return False
 
 
 def _decide_url(url, parse_intent=None):
@@ -349,8 +417,8 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
 
     LinearLayout = _step("加载LinearLayout类",
                          lambda: autoclass("android.widget.LinearLayout"))
-    Button = _step("加载Button类",
-                   lambda: autoclass("android.widget.Button"))
+    TextView = _step("加载TextView类",
+                     lambda: autoclass("android.widget.TextView"))
     WebView = _step("加载WebView类",
                     lambda: autoclass("android.webkit.WebView"))
     LayoutParams = _step("加载LayoutParams类",
@@ -362,59 +430,108 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _step("容器纵向排列",
           lambda: root.setOrientation(LinearLayout.VERTICAL), critical=False)
 
-    bar = _step("构造按钮栏容器", lambda: LinearLayout(activity))
-    _step("按钮栏横向排列",
-          lambda: bar.setOrientation(LinearLayout.HORIZONTAL), critical=False)
+    # v1.9.0 登录层 UI 重构：此前顶部双按钮（灰✕蓝✓小按钮）真机上
+    # 文字不显示（setText/setTextColor 被静默吞掉），用户只看到
+    # "三个色块"完全不知道是什么。重构为标准登录页布局——
+    # 深色标题栏（✕ + "网盘名 · 网页登录"）/ 黄色提示条 / WebView /
+    # 底部通栏"已完成登录"大按钮；文字经 _set_text 三级保险设置
     LLParams = _step("加载LinearLayout$LayoutParams类",
                      lambda: autoclass(
                          "android.widget.LinearLayout$LayoutParams"))
 
-    btn_back = _step("构造返回首页按钮", lambda: Button(activity))
-    _step("返回按钮文字", lambda: btn_back.setText("✕ 返回首页"),
+    titlebar = _step("构造标题栏", lambda: LinearLayout(activity))
+    _step("标题栏横向排列",
+          lambda: titlebar.setOrientation(LinearLayout.HORIZONTAL),
           critical=False)
-    _step("返回按钮配色",
-          lambda: (btn_back.setBackgroundColor(_jcolor(0xFF475569)),
-                   btn_back.setTextColor(_jcolor(0xFFFFFFFF))), critical=False)
+    _step("标题栏底色",
+          lambda: titlebar.setBackgroundColor(_jcolor(C_BAR_BG)),
+          critical=False)
+
+    # ✕ 关闭（左，白字 22sp）：点击放弃登录返回首页
+    tv_close = _step("构造关闭按钮", lambda: TextView(activity))
+    _step("关闭按钮文字", lambda: _set_text(tv_close, "✕"), critical=False)
+    _step("关闭按钮字色", lambda: _set_text_color(tv_close, C_WHITE),
+          critical=False)
+    _step("关闭按钮字号", lambda: tv_close.setTextSize(22.0), critical=False)
+    _step("关闭按钮居中", lambda: tv_close.setGravity(17), critical=False)
     # v1.8.4：点击回调必须存 Python 强引用——pyjnius 官方文档明确
     # proxy 只存指针不持引用，内联创建引用计数归零立即被 GC，
     # Java 侧点击已死 proxy 直接 native crash（真机"点击就闪退"根因）
-    click_back = _step("构造返回按钮点击回调",
-                       lambda: _ClickListener(on_cancel))
-    _step("返回按钮绑定点击", lambda: btn_back.setOnClickListener(click_back))
-    _step("返回按钮入栏", lambda: bar.addView(
-        btn_back, LLParams(0, 160, 1.0)))
+    click_close = _step("构造关闭点击回调",
+                        lambda: _ClickListener(on_cancel))
+    _step("关闭按钮绑定点击",
+          lambda: tv_close.setOnClickListener(click_close))
+    _step("关闭按钮入栏", lambda: titlebar.addView(tv_close,
+                                                  LLParams(240, -1)))
 
-    btn_done = _step("构造完成登录按钮", lambda: Button(activity))
-    _step("完成按钮文字", lambda: btn_done.setText("✓ 完成登录"),
+    # 标题（weight 撑满剩余宽度，白字 19sp 居中）
+    tv_title = _step("构造标题", lambda: TextView(activity))
+    _step("标题文字",
+          lambda: _set_text(tv_title, f"{title} · 网页登录"), critical=False)
+    _step("标题字色", lambda: _set_text_color(tv_title, C_WHITE),
           critical=False)
-    _step("完成按钮配色",
-          lambda: (btn_done.setBackgroundColor(_jcolor(0xFF2563EB)),
-                   btn_done.setTextColor(_jcolor(0xFFFFFFFF))), critical=False)
-    click_done = _step("构造完成按钮点击回调",
-                       lambda: _ClickListener(on_manual_done))
-    _step("完成按钮绑定点击", lambda: btn_done.setOnClickListener(click_done))
-    _step("完成按钮入栏", lambda: bar.addView(
-        btn_done, LLParams(0, 160, 1.0)))
+    _step("标题字号", lambda: tv_title.setTextSize(19.0), critical=False)
+    _step("标题居中", lambda: tv_title.setGravity(17), critical=False)
+    _step("标题入栏", lambda: titlebar.addView(
+        tv_title, LLParams(0, -1, 1.0)))
 
-    _step("按钮栏入容器", lambda: root.addView(bar, LayoutParams(-1, 160)))
+    # 右侧对称占位（240px 与 ✕ 区等宽，标题视觉真居中）
+    tv_spacer = _step("构造标题右占位", lambda: TextView(activity))
+    _step("右占位入栏", lambda: titlebar.addView(tv_spacer,
+                                                LLParams(240, -1)))
+
+    _step("标题栏入容器", lambda: root.addView(titlebar,
+                                               LayoutParams(-1, 170)))
+
+    # 提示条（浅黄底深棕字）：明确告诉用户操作路径
+    tv_tip = _step("构造提示条", lambda: TextView(activity))
+    _step("提示条文字",
+          lambda: _set_text(
+              tv_tip, "在下方页面登录账号，完成后点底部按钮保存 Cookie"),
+          critical=False)
+    _step("提示条底色",
+          lambda: tv_tip.setBackgroundColor(_jcolor(C_TIP_BG)),
+          critical=False)
+    _step("提示条字色", lambda: _set_text_color(tv_tip, C_TIP_FG),
+          critical=False)
+    _step("提示条字号", lambda: tv_tip.setTextSize(13.0), critical=False)
+    _step("提示条居中", lambda: tv_tip.setGravity(17), critical=False)
+    _step("提示条入容器", lambda: root.addView(tv_tip,
+                                               LayoutParams(-1, 110)))
 
     wv = _step("构造WebView", lambda: WebView(activity))
 
-    def _cfg():
-        settings = wv.getSettings()
-        settings.setJavaScriptEnabled(True)
-        settings.setDomStorageEnabled(True)
-        settings.setSupportZoomControls(True)
-        # 桌面 UA + 宽视口：Android WebView 默认移动 UA 会被多数网盘
-        # 302 到"下载客户端"引导页（v1.8.0 真机"点卡片打开的是下载
-        # App 页"根因）；桌面 UA 让服务端返回 PC 版登录页
-        settings.setUserAgentString(DESKTOP_UA)
-        settings.setUseWideViewPort(True)
-        settings.setLoadWithOverviewMode(True)
-        # v1.8.4：网页加载前 WebView 默认黑底（真机深色窗口背景下
-        # 观感即"黑色空白"），设白底更接近网页观感
-        wv.setBackgroundColor(_jcolor(0xFFFFFFFF))
-    _step("WebView基础配置", _cfg, critical=False)
+    # v1.9.0 配置拆分：原 _cfg 闭包任何一行抛异常，整块配置被
+    # critical=False 静默吞掉——setUserAgentString 若排在异常行之后
+    # 就根本没执行，真机 WebView 仍用默认移动 UA，网盘 302 到
+    # "下载客户端"页（真机"夸克/UC 是下载页"根因之一）。每项独立
+    # step + 桌面 UA 读回验证（结果记 nav_log，真机可诊断）
+    _step("启用JS", lambda: wv.getSettings().setJavaScriptEnabled(True),
+          critical=False)
+    _step("启用DOM存储", lambda: wv.getSettings().setDomStorageEnabled(True),
+          critical=False)
+
+    def _apply_ua():
+        s = wv.getSettings()
+        s.setUserAgentString(DESKTOP_UA)
+        ok = False
+        try:
+            ok = (str(s.getUserAgentString()) == DESKTOP_UA)
+        except Exception:
+            pass
+        log = _STATE["nav_log"]
+        log.append(("ua", time.strftime("%H:%M:%S"),
+                    "桌面UA已生效" if ok else "桌面UA设置失败(移动UA会跳下载页)"))
+        del log[:-50]
+        return ok
+    _step("设置桌面UA", _apply_ua, critical=False)
+    _step("宽视口", lambda: (wv.getSettings().setUseWideViewPort(True),
+                             wv.getSettings().setLoadWithOverviewMode(True)),
+          critical=False)
+    # v1.8.4：网页加载前 WebView 默认黑底（真机深色窗口背景下
+    # 观感即"黑色空白"），设白底更接近网页观感
+    _step("WebView白底", lambda: wv.setBackgroundColor(_jcolor(0xFFFFFFFF)),
+          critical=False)
 
     def _cookie():
         CookieManager = autoclass("android.webkit.CookieManager")
@@ -518,6 +635,26 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _step("WebView入容器", lambda: root.addView(wv, LLParams(-1, 0, 1.0)))
     _step("加载登录页", lambda: wv.loadUrl(url))
 
+    # v1.9.0 底部通栏"已完成登录"大按钮：蓝底白字 17sp 高对比 +
+    # 文字三级保险，替代原顶部小 ✓ 按钮（真机无字色块）
+    btn_done = _step("构造完成按钮", lambda: TextView(activity))
+    _step("完成按钮文字",
+          lambda: _set_text(btn_done, "✓  已完成登录，保存 Cookie"),
+          critical=False)
+    _step("完成按钮底色",
+          lambda: btn_done.setBackgroundColor(_jcolor(C_DONE_BG)),
+          critical=False)
+    _step("完成按钮字色", lambda: _set_text_color(btn_done, C_WHITE),
+          critical=False)
+    _step("完成按钮字号", lambda: btn_done.setTextSize(17.0), critical=False)
+    _step("完成按钮居中", lambda: btn_done.setGravity(17), critical=False)
+    click_done = _step("构造完成点击回调",
+                       lambda: _ClickListener(on_manual_done))
+    _step("完成按钮绑定点击",
+          lambda: btn_done.setOnClickListener(click_done))
+    _step("完成按钮入容器", lambda: root.addView(btn_done,
+                                                  LayoutParams(-1, 190)))
+
     # v1.8.3 全屏 Dialog 承载（根治"无法返回"）：
     # Android 10+ 手势返回直接 cancel Dialog（系统标准行为），不再
     # 依赖键盘事件（此前 addContentView 覆盖层方案下手势被 SDL
@@ -559,7 +696,7 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _STATE["client_cb"] = client_cb
     _STATE["key_cb"] = key_cb
     _STATE["cancel_cb"] = cancel_cb
-    _STATE["click_cbs"] = (click_back, click_done)
+    _STATE["click_cbs"] = (click_close, click_done)
     _STATE["closed"].clear()
 
 

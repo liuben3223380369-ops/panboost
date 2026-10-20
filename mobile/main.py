@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.8.5。
+"""PanBoost Android 图形壳（Kivy）v1.9.0。
+
+v1.9.0（真机反馈第六轮，登录层 UI 重构 + 网页版 URL 实锤修正）：
+①"顶部三个色块没有文字"：登录层顶部 ✕/✓ 双按钮的文字设置在
+  部分真机被静默吞掉（pyjnius 对 setText 多重载解析失败），用户
+  只看到色块不知道是什么。weblogin 重构为标准登录页布局：深色
+  标题栏（✕ + "网盘名 · 网页登录"）+ 黄色提示条 + WebView +
+  底部通栏"已完成登录"大按钮（蓝底白字 17sp 高对比）；文字
+  设置三级保险（str 直传 → java.lang.String 对象 → 失败记
+  nav_log）。
+②"夸克/阿里云盘打开是下载页"：登录 URL 落在产品宣传页——
+  LinkSwift @match 清单实锤网页版真实路径：阿里
+  www.alipan.com/drive/、天翼 cloud.189.cn/web/、移动云盘
+  yun.139.com（旧门户跳 APP 引导）；移动 domains 补 139.com。
+  夸克/UC 域名双源确认无误；桌面 UA 改独立设置 + 读回验证。
+③首页卡片三行化：网盘名 + 状态行（已登录/Cookie已存·未验证/
+  点击网页登录）+ 域名，操作引导一目了然。
 
 v1.8.5（真机反馈第五轮，参考网盘解析项目根治登录误报）：
 ①"点卡片就记已登录"：record_login 此前只看 Cookie 非空——登录页
@@ -133,7 +149,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.8.5"
+SHELL_VERSION = "1.9.0"
 
 
 def register_font():
@@ -879,17 +895,23 @@ class PanBoostApp(App):
         for pan in PANS:
             rec = acc.get(pan["key"])
             if rec is not None and rec.get("verified", True):
-                txt = f"{pan['name']}\n[b][color=#16a34a]已登录[/color][/b]"
+                txt = (f"{pan['name']}\n"
+                       "[b][color=#16a34a]已登录[/color][/b]\n"
+                       f"[sub]{pan['domains'][0]}[/sub]")
             elif rec is not None:
                 # v1.8.5：Cookie 已保存但无法验证登录态（localStorage
                 # 型网盘）——如实显示，绝不冒充"已登录"
                 txt = (f"{pan['name']}\n"
-                       "[b][color=#b45309]Cookie已存·未验证[/color][/b]")
+                       "[b][color=#b45309]Cookie已存·未验证[/color][/b]\n"
+                       f"[sub]{pan['domains'][0]}[/sub]")
             else:
-                txt = f"{pan['name']}\n[sub]{pan['domains'][0]}[/sub]"
+                # v1.9.0：第三行行动召唤，用户不用猜点卡片干什么
+                txt = (f"{pan['name']}\n"
+                       "[color=#2563eb]点击网页登录[/color]\n"
+                       f"[sub]{pan['domains'][0]}[/sub]")
             btn = CardButton(
                 text=txt, markup=True, font_size=sp(13),
-                size_hint_y=None, height=dp(84),
+                size_hint_y=None, height=dp(96),
                 halign="center", valign="middle")
             btn.bind(on_release=self._guard(self.pan_login, pan["key"]))
             grid.add_widget(btn)
@@ -924,10 +946,10 @@ class PanBoostApp(App):
                                     on_done, title=pan["name"],
                                     on_cancel=on_cancel)
                 self._home_status(
-                    f"已打开 {pan['name']} 登录页（桌面版）——"
-                    "手势/返回键或顶部 ✕ 可回到本页"
+                    f"已打开 {pan['name']} 网页登录（桌面版）——"
+                    "顶部 ✕ 或返回键回到本页"
                     + ("，检测到登录将自动保存" if pan["auth_keys"]
-                       else "，完成后点 ✓ 完成登录"))
+                       else "，登录后点底部【已完成登录】"))
                 return
             except Exception as e:
                 err_txt = f"{type(e).__name__}: {e}"

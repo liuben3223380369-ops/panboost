@@ -110,7 +110,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "1.8.5", "壳版本未升级到 1.8.5"
+    assert m.SHELL_VERSION == "1.9.0", "壳版本未升级到 1.9.0"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -173,7 +173,7 @@ def main():
     # ② 三色弹窗：floating 主题 Dialog 被 AOSP PhoneWindow 强制
     #    setLayout(WRAP_CONTENT, WRAP_CONTENT)，WebView 高度塌陷 0
     assert '"click_cbs"' in wsrc, "按钮点击回调未持强引用（GC 后闪退）"
-    assert "click_back, click_done" in wsrc, "两个按钮回调未存元组"
+    assert "click_close, click_done" in wsrc, "两个按钮回调未存元组"
     assert "setLayout(-1, -1)" in wsrc, \
         "Dialog 未显式全屏（floating 主题默认 wrap，WebView 塌陷）"
     assert "onRenderProcessGone" in jtxt, \
@@ -219,6 +219,32 @@ def main():
         "OneDrive 缺 ESTSAUTH 特征"
     assert "lid" in m.PAN_BY_KEY["dropbox"]["auth_keys"], \
         "Dropbox 缺 lid 特征"
+
+    # v1.9.0 真机修复（"三色块无字 + 夸克/阿里下载页 + UC 打不开"）：
+    # ① 文字三级保险 + 标准登录页布局（标题栏/提示条/底部大按钮）
+    # ② 登录 URL 实锤修正（LinkSwift @match：阿里 /drive、天翼
+    #    /web、移动 yun.139.com）
+    # ③ 桌面 UA 独立设置 + getUserAgentString 读回验证（整块配置
+    #    被吞是"下载页"根因）
+    assert "def _set_text" in wsrc, "缺文字三级保险（真机按钮无字根因）"
+    assert 'autoclass("java.lang.String")' in wsrc, \
+        "文字设置缺 Java String 回退（pyjnius 重载解析失败通道）"
+    assert "def _set_text_color" in wsrc, "缺文字颜色双保险"
+    assert "Color.rgb" in wsrc, "缺 Color.rgb 回退（int 转换失败通道）"
+    assert " · 网页登录" in wsrc, "缺标题栏标题（标准登录页布局）"
+    assert "在下方页面登录账号" in wsrc, "缺提示条（操作引导）"
+    assert "已完成登录，保存 Cookie" in wsrc, "缺底部完成大按钮文案"
+    assert "C_DONE_BG" in wsrc and "C_BAR_BG" in wsrc, "缺集中配色常量"
+    assert "getUserAgentString" in wsrc, "缺 UA 读回验证（下载页诊断）"
+    assert "setUserAgentString(DESKTOP_UA)" in wsrc, "UA 独立设置缺失"
+    assert m.PAN_BY_KEY["alipan"]["login"] == \
+        "https://www.alipan.com/drive/", "阿里登录页仍是宣传页（非 /drive/）"
+    assert m.PAN_BY_KEY["tianyi"]["login"] == \
+        "https://cloud.189.cn/web/", "天翼登录页非网页版 /web/ 路径"
+    assert m.PAN_BY_KEY["yidong"]["login"] == \
+        "https://yun.139.com/", "移动登录页仍是旧门户（跳 APP 引导）"
+    assert "139.com" in m.PAN_BY_KEY["yidong"]["domains"], \
+        "移动 Cookie 域缺 139.com（新域名匹配不到）"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

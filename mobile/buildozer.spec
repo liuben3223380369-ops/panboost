@@ -6,7 +6,7 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 1.8.5
+version = 1.9.0
 
 requirements = python3,kivy,certifi,pyjnius
 

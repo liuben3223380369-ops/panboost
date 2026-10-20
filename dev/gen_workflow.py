@@ -64,7 +64,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.8.5-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.9.0-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -77,12 +77,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.5 登录误报根治版）。' '真机反馈 v1.8.4 部分网盘登录异常：点击卡片即被记为已登录（错误）、三色区域依旧无内容。''本次深入参考网盘解析开源项目（LinkSwift / netdisk-fast-download）的登录态判定实现，三项根治：' '①登录凭证校验——此前只要 Cookie 非空就记账，而登录页的游客 Cookie（如百度的 BAIDUID）也非空，导致一进登录页点完成就被误记已登录。''现在点✓完成时必须检测到该网盘的登录特征 Cookie（百度 BDUSS、夸克/UC 的 __pus+__puus、天翼 COOKIE_LOGIN_USER 等，来自开源网盘解析项目的实战特征键）才记账；''未检测到会弹出提示且登录页保持打开。阿里云盘/迅雷/123 等登录态存在网页 localStorage 而非 Cookie 的网盘，如实显示 Cookie已存·未验证，绝不冒充已登录。' '②三色区域根治——对话框改用非浮动全屏主题构造（Android 框架对浮动主题窗口强制包内容尺寸，网页区域高度被压成 0），窗口天生全屏；''网页控件先挂载后加载并按权重分配高度；网盘页跳转 App/应用市场被拦截后自动回到登录页（最多两次），仍失败则显示说明页，不再空白。' '③夸克/UC 特征键修正——__puus 一小时过期导致检测失败，改为 __pus+__puus 双特征（开源项目实战白名单）。' 'v1.8.4 的回调强引用（防点击闪退）、渲染进程崩溃防护、v1.8.3 的手势返回/市场页拦截全部保留。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v1.8.5"
+          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.9.0 登录页 UI 重构版）。' '真机反馈 v1.8.5 三大遗留：UC 打不开、夸克/阿里云盘打开是下载页、登录页顶部三个色块没有文字。' '本次真实联网调研（LinkSwift 油猴脚本 @match 清单 + AList 驱动文档）后根治：' '①登录页 UI 重构——标准登录页布局：深色标题栏（✕ 关闭 + 网盘名·网页登录 标题）、黄色操作提示条、网页区、底部通栏【已完成登录，保存 Cookie】大按钮（蓝底白字高对比）；文字设置三级保险（str 直传 → Java String 对象 → 失败写入导航日志），此前顶部按钮文字在部分真机不显示（只看到色块不知道是什么）。' '②登录地址修正——阿里云盘此前打开的是官网宣传页（含下载客户端引导），改为网页版真实路径 www.alipan.com/drive/；天翼云盘改为 cloud.189.cn/web/；移动云盘改为 yun.139.com（旧门户会跳 APP 引导）；移动 Cookie 域补 139.com。夸克/UC 域名经 LinkSwift 与 AList 双源确认无误。' '③桌面 UA 强化——此前 UA 设置与其他 WebView 配置捆在一起，任一项失败整块被静默跳过，真机仍用移动 UA 被网盘跳到下载页；现在 UA 独立设置并读回验证，结果写入导航日志可诊断。' '首页卡片升级三行：网盘名 + 状态（已登录/Cookie已存·未验证/点击网页登录）+ 域名。' 'v1.8.5 登录凭证校验（防游客 Cookie 误记已登录）、v1.8.4 回调强引用防闪退、v1.8.3 手势返回全部保留。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v1.9.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.5" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.9.0" --latest --notes-file "$NOTES_FILE"
           fi
 '''
 
