@@ -149,7 +149,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.9.1"
+SHELL_VERSION = "1.9.2"
 
 
 def register_font():
@@ -942,9 +942,11 @@ class PanBoostApp(App):
                     f"已返回（{pan['name']} 登录未保存）——随时可再点卡片登录"))
 
             try:
-                weblogin.open_login(pan["login"], pan["auth_keys"],
-                                    on_done, title=pan["name"],
-                                    on_cancel=on_cancel)
+                weblogin.open_login(
+                    pan["login"], pan["auth_keys"], on_done,
+                    title=pan["name"], on_cancel=on_cancel,
+                    cookie_urls=tuple(f"https://{d}/"
+                                      for d in pan["domains"]))
                 self._home_status(
                     f"已打开 {pan['name']} 网页登录（桌面版）——"
                     "顶部 ✕ 或返回键回到本页"

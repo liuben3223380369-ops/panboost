@@ -61,7 +61,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.9.1-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.9.2-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -74,10 +74,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.9.1 登录完成闪退根治版）。' '真机 v1.9.0 反馈：登录保存 Cookie 后 App 直接闪退。' '根因：关闭登录层时回调对象的强引用被立即清空，Python 回收对象后，Chromium 渲染流水线中仍在飞行的导航回调（onPageStarted/Finished 等）经 Java 桥调用已回收对象，触发 native 崩溃（SIGSEGV）。此前版本用户从未真正走通登录（色块看不懂/地址错误），此关闭路径首次被真机执行即暴露。' '修复（三层防御）：①关闭登录层前先 stopLoading 并解绑 WebViewClient、返回键监听、Dialog 取消监听——切断回调源，飞行回调不再进入 Python；②Dialog dismiss + removeView 兜底保留；③全部对象（WebView/Dialog/回调）移入退休列表延迟回收（保留最近 6 批），即使个别 ROM 解绑未生效也不会闪退。' 'v1.9.0 的登录页标准布局、登录地址实锤修正（阿里 /drive、天翼 /web、移动 yun.139.com）、桌面 UA 读回验证全部保留。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v1.9.1"
+          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.9.2 保存按钮无反应根治版）。' '真机 v1.9.1 反馈：登录完成后点击底部【已完成登录，保存 Cookie】按钮没有任何反应。' '主根因（代码审查实锤）：v1.9.1 的一次代码替换事故误删了 current_cookies 函数的定义行（函数体被并入相邻函数、语法仍合法，编译与冒烟测试全部漏网）——点击保存后读 Cookie 必然失败，登录凭证校验永远不通过，登录层保持打开且仅弹一条Toast 提示，用户感知为完全无反应。' '修复：①恢复 current_cookies 函数定义，并新增关键函数存在性防回归检查；②校验失败时保存按钮文字直接变为红色【✗ 未检测到登录凭证，完成登录后再点】，3 秒后恢复——按钮文字是 v1.9.0 真机验证过的三级保险通道，可靠可见；③Toast 增加 Java String 双保险；④Cookie 多域合并采集——登录跳转常把 Cookie 种在关联域（如百度在 passport.baidu.com 登录、pan.baidu.com 使用），现遍历网盘全部关联域+登录页域合并去重，特征 Cookie 种在任意关联域都能命中；⑤点击/采集/校验全链路写入导航日志（只记 Cookie 键名不记值，防泄漏），真机问题取 nav-*.log 直接定位卡在哪一步。' 'v1.9.1 登录完成闪退根治（关闭时序三层防御）、v1.9.0 登录页 UI 重构与地址实锤修正全部保留。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v1.9.2"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.9.1" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.9.2" --latest --notes-file "$NOTES_FILE"
           fi

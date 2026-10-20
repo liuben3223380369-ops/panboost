@@ -110,7 +110,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "1.9.1", "壳版本未升级到 1.9.1"
+    assert m.SHELL_VERSION == "1.9.2", "壳版本未升级到 1.9.2"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -255,6 +255,26 @@ def main():
     assert "setOnKeyListener(None)" in wsrc, "关闭前未解绑返回键监听"
     assert "setOnCancelListener(None)" in wsrc, "关闭前未解绑取消监听"
     assert "del rl[:-6]" in wsrc, "退休列表缺上限裁剪"
+
+    # v1.9.2 真机根治："登录完成后点保存没反应"——凭证校验未通过
+    # 时仅靠 Toast（部分真机 ROM 静默失败），登录层保持打开且无
+    # 任何可见反馈。修复：按钮文字红色提示（三级保险通道）+
+    # Toast 双保险 + Cookie 多域合并采集 + 全链路导航日志埋点
+    assert "def _merge_cookies" in wsrc, "缺多域 Cookie 合并"
+    assert "def _gather_cookies" in wsrc, "缺多域采集（漏关联域 Cookie）"
+    assert "def _nudge_button" in wsrc, "缺按钮文字反馈（无反应根因）"
+    assert "def _jstr" in wsrc, "缺 Java String 转换（Toast 双保险）"
+    assert "_jstr(msg)" in wsrc, "Toast 未走双保险通道"
+    assert "C_ERR" in wsrc and "DONE_BTN_TEXT" in wsrc, \
+        "缺提示配色/文案常量"
+    assert '_STATE["btn_done"]' in wsrc, "保存按钮未入强引用状态"
+    assert "cookie_urls=()" in wsrc, "open_login 缺多域参数"
+    assert "cookie_urls=" in msrc, "main 未传网盘关联域列表"
+    assert '("click"' in wsrc, "缺点击埋点（真机诊断）"
+    assert '("check"' in wsrc, "缺校验结果埋点"
+    assert "已有Cookie键=" in wsrc, "校验日志缺 Cookie 键名记录"
+    assert "def current_cookies(url):" in wsrc, \
+        "current_cookies 定义缺失（v1.9.1 曾被误删致点保存必失败）"
     assert "139.com" in m.PAN_BY_KEY["yidong"]["domains"], \
         "移动 Cookie 域缺 139.com（新域名匹配不到）"
 

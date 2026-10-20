@@ -102,6 +102,8 @@ C_TIP_BG = 0xFFFEF3C7    # 提示条：浅黄
 C_TIP_FG = 0xFF92400E    # 提示条文字：深棕（浅黄底高对比）
 C_DONE_BG = 0xFF2563EB   # 完成按钮：主题蓝
 C_WHITE = 0xFFFFFFFF     # 白字（标题栏/按钮）
+C_ERR = 0xFFDC2626       # 校验失败提示：红（v1.9.2）
+DONE_BTN_TEXT = "✓  已完成登录，保存 Cookie"
 
 
 class WebLoginError(Exception):
@@ -150,7 +152,7 @@ class _ClickListener(PythonJavaClass):
 _STATE = {"root": None, "webview": None, "dialog": None, "poller": None,
           "on_close": None, "on_cancel": None, "done": False,
           "client_cb": None, "key_cb": None, "cancel_cb": None,
-          "click_cbs": None,
+          "click_cbs": None, "btn_done": None,
           "retired": [],
           "nav_log": [],
           "closed": threading.Event()}
@@ -190,7 +192,7 @@ def _toast(msg):
     def _show():
         try:
             Toast = autoclass("android.widget.Toast")
-            Toast.makeText(_activity(), msg, 0).show()
+            Toast.makeText(_activity(), _jstr(msg), 0).show()
         except Exception:
             pass
     try:
@@ -249,6 +251,89 @@ def _set_text_color(view, argb):
         return True
     except Exception:
         return False
+
+
+def _jstr(s):
+    """Python str 转 java.lang.String 对象（v1.9.2）。
+
+    Toast.makeText 等多重载方法（int/CharSequence）在部分真机
+    ROM 上 pyjnius 解析失败——与 setText 同款问题（v1.9.0 实锤）。
+    失败时返回原样 str（调用方 try/except 兜底）。
+    """
+    try:
+        return autoclass("java.lang.String")(s)
+    except Exception:
+        return s
+
+
+def _merge_cookies(*parts):
+    """合并多域 Cookie 字符串（v1.9.2 多域探测）。
+
+    网盘登录跳转常把 Cookie 种在关联域（如百度在
+    passport.baidu.com 登录、pan.baidu.com 使用）——只查登录页
+    URL 会漏。分号拆键值合并，后出现的键覆盖先前值。
+    返回合并串；全空返回 None。
+    """
+    out = {}
+    for part in parts:
+        if not part:
+            continue
+        for kv in part.split(";"):
+            kv = kv.strip()
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                out[k.strip()] = v
+    return "; ".join(f"{k}={v}" for k, v in out.items()) if out else None
+
+
+def _gather_cookies(urls):
+    """遍历 urls 逐域取 Cookie 并合并（v1.9.2）。
+
+    返回 (cookie, err)：任一域取到即有 cookie；err 为最后一次
+    异常文本（诊断用）。单域失败不中断其余域。
+    """
+    cookie = None
+    err = None
+    for u in urls:
+        try:
+            c = current_cookies(u)
+        except Exception as e:
+            err = f"{u}: {e}"
+            continue
+        if c:
+            cookie = _merge_cookies(cookie, c)
+    return cookie, err
+
+
+def _nudge_button():
+    """校验失败时把"保存"按钮文字改为红色提示 3 秒（v1.9.2）。
+
+    真机 v1.9.1 反馈"点保存没反应"：凭证校验未通过时仅弹
+    Toast——该通道在部分真机 ROM 上静默失败，用户看不到任何
+    变化。按钮文字是 v1.9.0 真机验证过的三级保险通道（可靠），
+    直接在按钮上反馈"未检测到凭证"，3 秒后恢复原文与白字。
+    """
+    btn = _STATE.get("btn_done")
+    if btn is None:
+        return
+    _STATE["nudge_seq"] = _STATE.get("nudge_seq", 0) + 1
+    seq = _STATE["nudge_seq"]
+
+    def _apply():
+        if _set_text(btn, "✗ 未检测到登录凭证，完成登录后再点"):
+            _set_text_color(btn, C_ERR)
+
+    def _restore():
+        if seq != _STATE.get("nudge_seq") or _STATE.get("done"):
+            return
+        _set_text(btn, DONE_BTN_TEXT)
+        _set_text_color(btn, C_WHITE)
+
+    try:
+        _run_ui(_apply)
+        threading.Timer(3.0, lambda: _run_ui(_restore)).start()
+    except Exception:
+        pass
 
 
 def _decide_url(url, parse_intent=None):
@@ -640,7 +725,7 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     # 文字三级保险，替代原顶部小 ✓ 按钮（真机无字色块）
     btn_done = _step("构造完成按钮", lambda: TextView(activity))
     _step("完成按钮文字",
-          lambda: _set_text(btn_done, "✓  已完成登录，保存 Cookie"),
+          lambda: _set_text(btn_done, DONE_BTN_TEXT),
           critical=False)
     _step("完成按钮底色",
           lambda: btn_done.setBackgroundColor(_jcolor(C_DONE_BG)),
@@ -698,6 +783,7 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _STATE["key_cb"] = key_cb
     _STATE["cancel_cb"] = cancel_cb
     _STATE["click_cbs"] = (click_close, click_done)
+    _STATE["btn_done"] = btn_done
     _STATE["closed"].clear()
 
 
@@ -779,11 +865,11 @@ def _ui_close():
         except Exception:
             pass
     _retire("root", "webview", "dialog", "client_cb", "key_cb",
-            "cancel_cb", "click_cbs")
+            "cancel_cb", "click_cbs", "btn_done")
     _STATE["closed"].set()
 
 
-
+def current_cookies(url):
     """取 WebView 里 url 域的 Cookie（含 httpOnly）。失败返回 None。"""
     box = {}
 
@@ -813,13 +899,15 @@ def _ui_close():
 
 
 def open_login(url, auth_keys=(), on_done=None, title="登录",
-               on_cancel=None):
+               on_cancel=None, cookie_urls=()):
     """打开 WebView 登录层。
 
     url: 登录页地址（桌面 UA 加载，避免移动端跳"下载App"引导页）
     auth_keys: 登录成功特征 Cookie 键（如百度 BDUSS）；命中即自动完成
     on_done(cookie_str, auto: bool): 完成回调（手动按钮或特征命中）
     on_cancel(): 放弃登录回调（✕ 返回首页按钮或返回键触发）
+    cookie_urls: 额外 Cookie 采集域 URL（v1.9.2 多域探测；与登录
+        页 URL 合并遍历，特征 Cookie 种在关联域也能命中）
     返回 True 表示已打开；失败抛 WebLoginError（调用方回退手动路径）。
     """
     if not _JNIUS_OK:
@@ -830,23 +918,39 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
     _STATE["on_cancel"] = on_cancel
     _STATE["done"] = False
     done_once = threading.Event()
+    # v1.9.2 多域探测序列：网盘全部关联域 + 登录页 URL（最后，
+    # 同键时登录页域优先）。登录跳转把 Cookie 种在关联域的场景
+    # （如百度 passport↔pan）不再漏采
+    probe_urls = tuple(cookie_urls) + (url,)
 
     def _finish(auto):
         if done_once.is_set():
             return
-        cookie = None
-        try:
-            cookie = current_cookies(url)
-        except Exception:
-            pass
+        # v1.9.2 全链路埋点：点击→多域采集→校验逐环节写导航日志
+        # （只记 Cookie 键名不记值，防泄漏），真机"没反应"类问题
+        # nav-*.log 直接定位卡在哪一步
+        log = _STATE["nav_log"]
+        log.append(("click", time.strftime("%H:%M:%S"),
+                    "手动点击保存" if not auto else "特征Cookie自动命中"))
+        del log[:-80]
+        cookie, cerr = _gather_cookies(probe_urls)
         # v1.8.5 登录凭证校验（根治"点卡片就记已登录"）：登录页
         # 游客 Cookie（BAIDUID 等）也非空，"Cookie 非空"绝不等于
         # 已登录——参考网盘解析项目的判定思路，auth_keys 全部命中
-        # 才算登录成功。未命中：Toast 提示 + 登录层保持打开（不
-        # 关层、不回调、不记账，用户可继续完成登录后再点 ✓）
+        # 才算登录成功。未命中（v1.9.2 反馈强化）：按钮文字变红色
+        # 提示（三级保险通道，真机可靠）+ Toast 双保险 + 登录层
+        # 保持打开（不关层、不回调、不记账，完成登录后再点即可）
         keys = [k.lower() for k in auth_keys]
-        if keys and not (cookie
-                         and all(f"{k}=" in cookie.lower() for k in keys)):
+        ok = bool(cookie) and all(f"{k}=" in cookie.lower() for k in keys)
+        ck = sorted({p.split("=", 1)[0].strip()
+                     for p in (cookie or "").split(";") if "=" in p})
+        log.append(("check", time.strftime("%H:%M:%S"),
+                    f"凭证校验={'通过' if ok or not keys else '未通过'}"
+                    f" 已有Cookie键={ck} 等待特征键={keys}"
+                    + (f" 采集异常[{cerr}]" if cerr else "")))
+        del log[:-80]
+        if keys and not ok:
+            _nudge_button()
             _toast(f"未检测到{title}的登录凭证，请先在页面完成登录")
             return
         done_once.set()
@@ -859,7 +963,7 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
             # 防 GC 闪退）；绝不在非 UI 线程直接操作视图（Android
             # 会抛 CalledFromWrongThread）
             _retire("root", "webview", "dialog", "client_cb", "key_cb",
-                    "cancel_cb", "click_cbs")
+                    "cancel_cb", "click_cbs", "btn_done")
             _STATE["closed"].set()
         poller = _STATE["poller"]
         if poller is not None:
@@ -934,7 +1038,7 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
                 return
             if keys:
                 try:
-                    c = current_cookies(url)
+                    c, _ = _gather_cookies(probe_urls)
                     if c and all(f"{k}=" in c.lower() for k in keys):
                         _finish(True)
                         return
@@ -979,7 +1083,7 @@ def close_login():
         # post 失败：只重置状态（对象入退休列表防 GC 闪退），
         # 绝不在非 UI 线程操作视图
         _retire("root", "webview", "dialog", "client_cb", "key_cb",
-                "cancel_cb", "click_cbs")
+                "cancel_cb", "click_cbs", "btn_done")
         _STATE["closed"].set()
     cb = _STATE.get("on_cancel")
     _STATE["on_cancel"] = None

@@ -332,8 +332,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本1.9.1",
-          mobile_main.SHELL_VERSION == "1.9.1", mobile_main.SHELL_VERSION)
+    check("壳-壳版本1.9.2",
+          mobile_main.SHELL_VERSION == "1.9.2", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
@@ -436,6 +436,58 @@ def main():
           == "https://yun.139.com/"
           and "139.com" in mobile_main.PAN_BY_KEY["yidong"]["domains"],
           "阿里 /drive、天翼 /web、移动 yun.139.com")
+    # ---- v1.9.2 根治"点保存没反应"（反馈通道+多域采集+埋点） ----
+    check("壳-关键函数完整存在（v1.9.1误删current_cookies防回归）",
+          hasattr(_wl, "current_cookies")
+          and hasattr(_wl, "open_login")
+          and hasattr(_wl, "close_login") and hasattr(_wl, "is_open")
+          and hasattr(_wl, "nav_log"),
+          "v1.9.1 曾误删 def current_cookies 致点保存必失败")
+    msrc = Path(mobile_main.__file__).read_text(encoding="utf-8")
+    check("壳-保存按钮反馈与多域采集结构（v1.9.2）",
+          "def _nudge_button" in wsrc and "def _merge_cookies" in wsrc
+          and "def _gather_cookies" in wsrc and "def _jstr" in wsrc
+          and "C_ERR" in wsrc and "DONE_BTN_TEXT" in wsrc
+          and '_STATE["btn_done"]' in wsrc
+          and "cookie_urls=" in msrc,
+          "按钮红色提示+Toast双保险+多域Cookie+点击/校验埋点")
+    m1 = _wl._merge_cookies(None, "x=1; y=2")
+    m2 = _wl._merge_cookies("x=1; y=2", "y=9; z=3")
+    m3 = _wl._merge_cookies(None, None)
+    check("壳-_merge_cookies合并去重与空安全",
+          m1 == "x=1; y=2" and m2 == "x=1; y=9; z=3" and m3 is None,
+          f"{m1!r} / {m2!r} / {m3!r}")
+    check("壳-_jstr非Android回退原串",
+          _wl._jstr("abc") == "abc",
+          "Java String 通道不可用时静默回退")
+    _oc = _wl.current_cookies
+    try:
+        _wl.current_cookies = lambda u: {
+            "https://a.com/": "x=1",
+            "https://b.com/": "y=2; x=9"}.get(u)
+        c, e = _wl._gather_cookies(
+            ("https://a.com/", "https://b.com/", "https://c.com/"))
+        check("壳-_gather_cookies多域合并与空域容错",
+              c == "x=9; y=2" and e is None, f"cookie={c!r} err={e!r}")
+        _wl.current_cookies = lambda u: (_ for _ in ()).throw(
+            RuntimeError("boom"))
+        c2, e2 = _wl._gather_cookies(("https://a.com/",))
+        check("壳-_gather_cookies全失败返回异常文本",
+              c2 is None and "boom" in (e2 or ""), f"err={e2!r}")
+    finally:
+        _wl.current_cookies = _oc
+    _saved2 = dict(_wl._STATE)
+    try:
+        _wl._STATE["btn_done"] = None
+        _wl._nudge_button()
+        _wl._STATE["btn_done"] = object()
+        _wl._nudge_button()
+        check("壳-_nudge_button非Android环境安全无异常", True,
+              "按钮为 None 早退；_run_ui 不可用被吞不抛")
+    finally:
+        _wl._STATE.clear()
+        _wl._STATE.update(_saved2)
+
     # ---- v1.9.1 根治"登录完成后直接闪退"（关闭时序三层防御） ----
     check("壳-退休列表机制（防GC后Java回调闪退）",
           "def _retire" in wsrc and '"retired": []' in wsrc
@@ -513,8 +565,8 @@ def main():
     mobile_main.weblogin.available = lambda: True
     orig_open = mobile_main.weblogin.open_login
     mobile_main.weblogin.open_login = (
-        lambda url, keys, on_done, title="", on_cancel=None:
-        on_done("BDUSS=fake123", True))
+        lambda url, keys, on_done, title="", on_cancel=None,
+        cookie_urls=(): on_done("BDUSS=fake123", True))
     app.pan_login("baidu")
     mobile_main.weblogin.open_login = orig_open
     acc = mobile_main.load_accounts()
@@ -571,8 +623,8 @@ def main():
     mobile_main.weblogin.available = lambda: True
     orig_open = mobile_main.weblogin.open_login
     mobile_main.weblogin.open_login = (
-        lambda url, keys, on_done, title="", on_cancel=None:
-        on_done("BDUSS=fake456", True))
+        lambda url, keys, on_done, title="", on_cancel=None,
+        cookie_urls=(): on_done("BDUSS=fake456", True))
     app.pan_login("baidu")
     mobile_main.weblogin.open_login = orig_open
     navs = sorted(Path(tmp).glob("nav-baidu-*.log"))
@@ -589,7 +641,8 @@ def main():
     # v1.7.2 起：失败详情（含步骤名）显示到账号页状态栏 + 落 crash log
     mobile_main.weblogin.available = lambda: True
 
-    def _boom(url, keys, on_done, title="", on_cancel=None):
+    def _boom(url, keys, on_done, title="", on_cancel=None,
+              cookie_urls=()):
         raise mobile_main.weblogin.WebLoginError(
             "登录层挂载失败: WebLoginError: 步骤[挂载到窗口]失败: "
             "RuntimeException: addContentView")
