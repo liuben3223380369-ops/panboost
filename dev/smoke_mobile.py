@@ -112,7 +112,9 @@ class _Builder:
                        files_info=_Widget(),
                        files_box=_Widget(),
                        files_sel_all=_Widget(text="全选 / 全不选"),
-                       files_dl_btn=_Widget(text="下载所选"))
+                       files_dl_btn=_Widget(text="下载所选"),
+                       files_retry_box=_Widget(),
+                       files_error_detail=_Widget())
         sm = types.SimpleNamespace()
         sm.current = "home"
         sm._screens = {"home": home, "download": download,
@@ -312,23 +314,28 @@ def main():
     # ---- v1.8.1 登录层桌面 UA + 返回键 ----
     import weblogin as _wl
     wsrc = Path(_wl.__file__).read_text(encoding="utf-8")
+    # v3.2.0 独立 Activity：UI/WebView/校验全在 Java 侧
+    _java_dir = Path(mobile_main.__file__).parent / "java_classes"
+    lsrc = (_java_dir / "LoginActivity.java").read_text(encoding="utf-8")
+    jtxt = (_java_dir / "PanWebViewClient.java").read_text(
+        encoding="utf-8")
     check("壳-登录层桌面UA防跳下载App页",
           "Windows NT" in _wl.DESKTOP_UA
-          and "setUserAgentString(DESKTOP_UA)" in wsrc
-          and "setUseWideViewPort" in wsrc,
+          and "setUserAgentString" in lsrc
+          and "setUseWideViewPort" in lsrc,
           _wl.DESKTOP_UA[:56] + "…")
-    check("壳-登录层✕关闭与完成登录按钮（v1.9.0 标准布局）",
-          '"✕"' in wsrc and "已完成登录，保存 Cookie" in wsrc
-          and " · 网页登录" in wsrc
+    check("壳-登录层✕关闭与完成登录按钮（v1.9.0 布局→Java 化）",
+          '"✕"' in lsrc and "已完成登录，保存 Cookie" in lsrc
+          and " · 网页登录" in lsrc
           and hasattr(_wl, "close_login")
           and hasattr(_wl, "request_back")
-          and "canGoBack" in wsrc)
+          and "canGoBack" in lsrc)
     check("壳-返回键keycode27已接入",
           hasattr(mobile_main.PanBoostApp, "_on_key")
           and "on_keyboard" in py_src and "key != 27" in py_src
           and "weblogin.request_back()" in py_src)
     check("壳-无登录层时返回接口安全",
-          _wl.request_back() is False, "request_back 返回 False")
+          _wl.request_back() is None, "request_back 无层时静默幂等")
     _wl.close_login()  # 幂等：无登录层不抛错不回调
     check("壳-close_login幂等无异常", True)
     app.go("accounts")
@@ -356,14 +363,16 @@ def main():
           == (True, "https://m.baidu.com/")
           and _wl._decide_url("intent://x/#Intent;end",
                               parse_intent=lambda u: None) == (True, None))
-    check("壳-WebViewClient导航守卫已接入",
-          "setWebViewClient" in wsrc and "PanWebViewClient" in wsrc
-          and "_UrlLoadingCallback" in wsrc
+    check("壳-WebViewClient导航守卫已接入（v3.2.0 Java 化）",
+          "setWebViewClient" in lsrc and "extends WebViewClient" in jtxt
+          and "UrlLoadingCallback" in jtxt
+          and "browser_fallback_url" in lsrc
           and "browser_fallback_url" in wsrc,
-          "Java桥接类+Python回调")
-    check("壳-WebView层返回键监听已挂",
-          "setOnKeyListener" in wsrc and "_BackKeyListener" in wsrc
-          and "setFocusable" in wsrc)
+          "Java桥接类+LoginActivity实现回调")
+    check("壳-返回键onBackPressed系统级处理（v3.2.0）",
+          "onBackPressed" in lsrc and "canGoBack" in lsrc
+          and "notifyCancel" in lsrc,
+          "canGoBack 先退网页，否则取消并 finish")
     java_path = Path(mobile_main.__file__).parent / "java_classes" \
         / "PanWebViewClient.java"
     check("壳-Java桥接类存在且覆写双签名",
@@ -376,26 +385,24 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.1.0",
-          mobile_main.SHELL_VERSION == "3.1.0", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.2.0",
+          mobile_main.SHELL_VERSION == "3.2.0", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
-    check("壳-按钮回调持Python强引用（防GC闪退）",
-          '"click_cbs"' in wsrc
-          and "click_close, click_done" in wsrc
-          and "tv_close.setOnClickListener(click_close)" in wsrc
-          and "btn_done.setOnClickListener(click_done)" in wsrc,
+    check("壳-结果回调双端防GC（Python退休+Java置null）",
+          '"callback": None' in wsrc
+          and "def _retire" in wsrc
+          and "sCallback = null" in lsrc,
           "pyjnius proxy 只存指针不持引用")
-    check("壳-Dialog显式全屏（防WebView高度塌陷）",
-          "setLayout(-1, -1)" in wsrc
-          and "dialog.show()" in wsrc
-          and wsrc.index("dialog.show()") < wsrc.index("setLayout(-1, -1)"),
-          "show 后 setLayout 全屏")
+    check("壳-登录层独立Activity承载（v3.2.0 根治弹窗不显示）",
+          'autoclass("android.app.Dialog")' not in wsrc
+          and "extends Activity" in lsrc
+          and "setContentView" in lsrc,
+          "系统级窗口，无 Dialog 时序/主题 wrap 竞争")
     check("壳-渲染进程崩溃处理已接通（防杀）",
-          "onRenderProcessGone" in java_path.read_text(encoding="utf-8")
-          and "onRenderGone" in wsrc
-          and "_on_render_gone" in wsrc,
-          "onRenderProcessGone 返回 true + 自动关层")
+          "onRenderProcessGone" in jtxt
+          and "onRenderGone" in lsrc,
+          "onRenderProcessGone 返回 true + Java 侧自动关页")
     check("壳-登录回调调度回Kivy主线程",
           hasattr(mobile_main, "_on_ui")
           and "Clock.schedule_once" in py_src)
@@ -403,27 +410,25 @@ def main():
     check("壳-_on_ui冒烟可调用", True)
 
     # ---- v1.8.5 修复"误记已登录 + 三色区域依旧没字" ----
-    check("壳-Dialog非floating全屏主题构造",
-          "Theme_Light_NoActionBar_Fullscreen" in wsrc
-          and "android.R$style" in wsrc,
-          "floating 主题强制 wrap 是三色弹窗根因，主题构造根治")
-    check("壳-WebView先入容器后加载且weight布局",
-          wsrc.index('_step("加载登录页"')
-          > wsrc.index('_step("WebView入容器"')
-          and "LLParams(-1, 0, 1.0)" in wsrc,
-          "未 attach 就 loadUrl 部分ROM不渲染；weight=1 稳占剩余高度")
+    check("壳-WebView weight布局稳占剩余高度",
+          "MATCH_PARENT, 0, 1f" in lsrc,
+          "LinearLayout weight=1 标准剩余空间分配")
+    check("壳-WebView先构建后加载（attach后loadUrl）",
+          lsrc.index("root.addView(wv")
+          < lsrc.index("wv.loadUrl(loginUrl)"),
+          "未 attach 就 loadUrl 部分ROM不渲染")
     check("壳-登录凭证校验（防游客Cookie误记已登录）",
-          'f"未检测到{title}的登录凭证' in wsrc
-          and "def _toast" in wsrc
-          and "Toast.makeText" in wsrc,
-          "特征键未命中 Toast 提示且登录层保持打开")
-    check("壳-凭证校验先于关层（未命中不关层不回调）",
-          wsrc.index('f"未检测到{title}的登录凭证')
-          < wsrc.index("done_once.set()", wsrc.index("def _finish")),
-          "校验失败 return 早于 done_once.set()")
+          "未检测到登录凭证" in lsrc
+          and "Toast.makeText" in lsrc
+          and "checkAuth" in lsrc,
+          "特征键未命中红字+Toast提示且页面保持打开")
+    check("壳-凭证校验先于关层（未命中不关页不回调）",
+          lsrc.index("未检测到登录凭证")
+          < lsrc.index("notifyResult(c, false)"),
+          "onDoneClicked 校验失败 return 早于 notifyResult")
     check("壳-拦截回退防空白屏",
-          "_fallback_after_block" in wsrc
-          and "_BLOCKED_HTML" in wsrc,
+          "fallbackAfterBlock" in lsrc
+          and "BLOCKED_HTML" in lsrc,
           "scheme/市场跳转被拦后回退重载登录页，2次后显示说明页")
     check("壳-record_login防御性凭证校验+verified语义",
           '"verified": bool(keys)' in py_src
@@ -438,39 +443,25 @@ def main():
           "夸克/UC=__pus+__puus；天翼=COOKIE_LOGIN_USER；OneDrive=ESTSAUTH")
 
     # ---- v1.9.0 修复"三色块无字 + 夸克/阿里下载页 + UC 打不开" ----
-    check("壳-文字三级保险（真机按钮无字根因）",
-          "def _set_text" in wsrc
-          and 'autoclass("java.lang.String")' in wsrc,
-          "setText 重载解析失败时走 Java String 对象通道")
-    check("壳-文字颜色双保险",
-          "def _set_text_color" in wsrc and "Color.rgb" in wsrc,
-          "int 直传失败时 Color.rgb 同类型回传")
+    check("壳-Java侧文字直设置+启动参数JavaString通道",
+          'autoclass("java.lang.String")' in wsrc
+          and "setText(" in lsrc,
+          "v3.2.0 文字全在Java侧（编译期类型保证）")
+    check("壳-Java侧文字颜色直设置",
+          "setTextColor(" in lsrc,
+          "编译期 int 类型保证（0xFF 字面量无溢出）")
 
-    class _V:
-        def __init__(self, fail=False):
-            self.txt = None
-            self.fail = fail
-
-        def setText(self, t):
-            if self.fail:
-                raise RuntimeError("no such method")
-            self.txt = t
-    v_ok = _V()
-    check("壳-_set_text一级直传生效",
-          _wl._set_text(v_ok, "测试") is True and v_ok.txt == "测试")
-    check("壳-_set_text全失败返回False",
-          _wl._set_text(_V(fail=True), "测试") is False,
-          "非Android下二级通道不可用→False（真机二级通道生效）")
     check("壳-标准登录页布局（标题栏+提示条+底部大按钮）",
-          "C_BAR_BG" in wsrc and " · 网页登录" in wsrc
-          and "在下方页面登录账号" in wsrc
-          and "已完成登录，保存 Cookie" in wsrc
-          and "C_DONE_BG" in wsrc,
-          "消灭'三个色块不知道是什么'")
+          " · 网页登录" in lsrc
+          and "在下方页面登录账号" in lsrc
+          and "已完成登录，保存 Cookie" in lsrc
+          and "0xFF0F172A" in lsrc,
+          "Java 侧深色标题栏+黄色提示条+蓝色大按钮")
     check("壳-桌面UA读回验证（下载页根因诊断）",
-          "getUserAgentString" in wsrc
-          and "setUserAgentString(DESKTOP_UA)" in wsrc,
-          "UA 曾与整块配置一起被吞，现独立设置+验证记 nav_log")
+          "getUserAgentString" in lsrc
+          and "setUserAgentString(ua)" in lsrc
+          and "desktop-fail" in lsrc,
+          "UA 读回验证失败记 nav_log（真机可诊断）")
     check("壳-登录URL实锤修正（LinkSwift @match）",
           mobile_main.PAN_BY_KEY["alipan"]["login"]
           == "https://www.alipan.com/drive/"
@@ -488,13 +479,12 @@ def main():
           and hasattr(_wl, "nav_log"),
           "v1.9.1 曾误删 def current_cookies 致点保存必失败")
     msrc = Path(mobile_main.__file__).read_text(encoding="utf-8")
-    check("壳-保存按钮反馈与多域采集结构（v1.9.2）",
-          "def _nudge_button" in wsrc and "def _merge_cookies" in wsrc
+    check("壳-保存按钮反馈与多域采集结构（v1.9.2→Java 化）",
+          "def _merge_cookies" in wsrc
           and "def _gather_cookies" in wsrc and "def _jstr" in wsrc
-          and "C_ERR" in wsrc and "DONE_BTN_TEXT" in wsrc
-          and '_STATE["btn_done"]' in wsrc
+          and "NUDGE_TXT" in lsrc and "gatherCookies" in lsrc
           and "cookie_urls=" in msrc,
-          "按钮红色提示+Toast双保险+多域Cookie+点击/校验埋点")
+          "Java 侧红字提示+Toast+多域Cookie采集")
     m1 = _wl._merge_cookies(None, "x=1; y=2")
     m2 = _wl._merge_cookies("x=1; y=2", "y=9; z=3")
     m3 = _wl._merge_cookies(None, None)
@@ -520,28 +510,21 @@ def main():
               c2 is None and "boom" in (e2 or ""), f"err={e2!r}")
     finally:
         _wl.current_cookies = _oc
-    _saved2 = dict(_wl._STATE)
-    try:
-        _wl._STATE["btn_done"] = None
-        _wl._nudge_button()
-        _wl._STATE["btn_done"] = object()
-        _wl._nudge_button()
-        check("壳-_nudge_button非Android环境安全无异常", True,
-              "按钮为 None 早退；_run_ui 不可用被吞不抛")
-    finally:
-        _wl._STATE.clear()
-        _wl._STATE.update(_saved2)
+    check("壳-LoginActivity状态导出与清理接口（Java 侧）",
+          "dumpNavLog" in lsrc and "clearNavLog" in lsrc
+          and "finishSelf" in lsrc,
+          "Python 侧 nav_log/close_login 依赖的 Java 静态方法")
 
     # ---- v1.9.1 根治"登录完成后直接闪退"（关闭时序三层防御） ----
     check("壳-退休列表机制（防GC后Java回调闪退）",
           "def _retire" in wsrc and '"retired": []' in wsrc
           and "del rl[:-6]" in wsrc,
           "回调对象延迟回收，封死 dismiss 后飞行回调窗口")
-    check("壳-关闭前解绑回调源（闪退根因）",
-          "setWebViewClient(None)" in wsrc
-          and "setOnKeyListener(None)" in wsrc
-          and "setOnCancelListener(None)" in wsrc,
-          "dismiss 不终止 Chromium 流水线，必须先切断回调源")
+    check("壳-Activity销毁兜底通知（v3.2.0 生命周期化）",
+          "onDestroy" in lsrc
+          and "wv.destroy()" in lsrc
+          and "sInstance = null" in lsrc,
+          "任何退出路径都发一次结果；WebView 销毁防泄漏")
 
     _saved = dict(_wl._STATE)
     try:
@@ -571,17 +554,17 @@ def main():
 
 
     # ---- v1.8.3 Dialog 承载 + onPageStarted 导航观测 ----
-    check("壳-登录层全屏Dialog承载（手势返回系统级）",
-          "android.app.Dialog" in wsrc
-          and "setOnCancelListener" in wsrc
-          and "setCancelable(True)" in wsrc
-          and "_CancelListener" in wsrc
-          and "DialogInterface$OnCancelListener" in wsrc
-          and "dialog.dismiss()" in wsrc)
-    check("壳-onPageStarted导航观测已接入",
-          "onPageStarted" in wsrc and "onPageFinished" in wsrc
-          and "stopLoading" in wsrc
-          and "onPageStarted" in java_path.read_text(encoding="utf-8"),
+    check("壳-登录层独立Activity承载（v3.2.0 系统级窗口）",
+          'autoclass("android.app.Dialog")' not in wsrc
+          and "org/panboost/login/LoginActivity$Callback" in wsrc
+          and "LoginActivity.start" in wsrc
+          and "extends Activity" in lsrc
+          and "onBackPressed" in lsrc,
+          "启动单一静态方法+一次性结果回调")
+    check("壳-onPageStarted导航观测已接入（Java 侧）",
+          "onPageStarted" in lsrc and "onPageFinished" in lsrc
+          and "stopLoading" in lsrc
+          and "onPageStarted" in jtxt,
           "302 落地守卫 + 导航日志")
     check("壳-市场URL黑名单命中正确",
           "market://details?id=x".startswith(_wl.MARKET_PREFIXES)
@@ -627,13 +610,13 @@ def main():
 
     # ---- v2.1.0 已登录直入浏览模式 + 会话总闸 ----
     wsrc210 = Path(_wl.__file__).read_text(encoding="utf-8")
-    check("壳-浏览模式与会话总闸（v2.1.0）",
+    check("壳-浏览模式与会话总闸（v2.1.0→v3.2.0 Java 轮询）",
           "def open_browse" in wsrc210
           and '"session": 0' in wsrc210
-          and wsrc210.count("_only_now") >= 6
-          and "time.sleep(3.0)" in wsrc210
-          and "browse=True" in wsrc210,
-          "已登录秒关层闪退根治：浏览模式+迟到回调作废+poller首轮延迟")
+          and "postDelayed(pollRunnable, 3000)" in lsrc
+          and "postDelayed(this, 1200)" in lsrc
+          and "bool(browse)" in wsrc210,
+          "浏览模式+会话总闸+Java poller首轮3s延迟")
     check("壳-18家网盘全部有home页",
           all(p.get("home") for p in pans)
           and pans[0]["home"] == "https://pan.baidu.com/disk/main",
@@ -713,11 +696,11 @@ def main():
     pb.save_cookie_store(_st)
 
     # v1.8.3 导航日志落盘：onPageStarted 记录 → 登录结束 nav-*.log
-    _wl._STATE["nav_log"].clear()
-    _wl._STATE["nav_log"].append(
-        ("start", "08:00:00", "https://pan.quark.cn/"))
-    _wl._STATE["nav_log"].append(
-        ("block", "08:00:01", "市场URL已拦截: market://details?id=x"))
+    _orig_navlog = _wl.nav_log
+    _nav_entries = [
+        ("start", "08:00:00", "https://pan.quark.cn/"),
+        ("block", "08:00:01", "市场URL已拦截: market://details?id=x")]
+    _wl.nav_log = lambda: list(_nav_entries)
     mobile_main.weblogin.available = lambda: True
     orig_open = mobile_main.weblogin.open_login
     mobile_main.weblogin.open_login = (
@@ -733,6 +716,7 @@ def main():
     check("壳-nav_log导出函数行为",
           hasattr(_wl, "nav_log") and len(_wl.nav_log()) == 2,
           f"{len(_wl.nav_log())} 条")
+    _wl.nav_log = _orig_navlog
 
     # WebView 打开失败（真机 v1.7.0"卡片点击无反应"事故路径）→
     # 必须抛回调用方并回落账号屏手动路径，绝不静默；
@@ -742,8 +726,7 @@ def main():
     def _boom(url, keys, on_done, title="", on_cancel=None,
               cookie_urls=()):
         raise mobile_main.weblogin.WebLoginError(
-            "登录层挂载失败: WebLoginError: 步骤[挂载到窗口]失败: "
-            "RuntimeException: addContentView")
+            "登录页启动失败: RuntimeError: autoclass")
 
     orig_open = mobile_main.weblogin.open_login
     mobile_main.weblogin.open_login = _boom
@@ -754,9 +737,9 @@ def main():
     check("壳-WebView失败回落账号屏手动路径",
           app._scr("accounts").ids.domain_input.text == "quark.cn"
           and app.root.ids.sm.current == "accounts")
-    check("壳-WebView失败详情可见（账号页状态栏含步骤名）",
+    check("壳-登录页失败详情可见（账号页状态栏含错误类型）",
           "WebView 登录打开失败" in acc_st
-          and "步骤[挂载到窗口]" in acc_st
+          and "登录页启动失败" in acc_st
           and "手动模式" in acc_st, acc_st[:80])
     check("壳-WebView失败已落crash日志",
           len(list(Path(tmp).glob("crash-*.log"))) == n_crash0 + 1

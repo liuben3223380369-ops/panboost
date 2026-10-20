@@ -78,13 +78,12 @@ def main():
     # + UI 线程异步异常静默丢失）CI 无法运行 WebView，靠静态扫描防回归
     import weblogin
     wsrc = Path(weblogin.__file__).read_text(encoding="utf-8")
-    assert "setBackgroundColor(0x" not in wsrc, \
-        "颜色字面量未经 _jcolor（Java int 溢出，真机静默炸点）"
-    assert "setTextColor(0x" not in wsrc, \
-        "颜色字面量未经 _jcolor（Java int 溢出，真机静默炸点）"
-    assert "def _jcolor" in wsrc, "缺 _jcolor 符号转换"
-    assert "opened_evt" in wsrc, "UI 挂载结果未确认回传（fire-and-forget）"
-    assert "步骤[" in wsrc, "挂载缺分步自检（失败无法定位步骤）"
+    # v3.2.0 独立 Activity：UI 全在 Java 侧（颜色/文字编译期类型
+    # 保证），Python 侧只启动与收结果——启动失败必须同步抛出
+    assert "LoginActivity" in wsrc, "未接入独立登录 Activity"
+    assert "登录页启动失败" in wsrc, "start 失败未同步抛出（fire-and-forget）"
+    assert 'org/panboost/login/LoginActivity$Callback' in wsrc, \
+        "回调接口签名异常"
     assert hasattr(weblogin, "open_login") and hasattr(weblogin, "available")
     # 按钮回调必须经 _guard 兜底（异常可见，不静默进 logcat）
     msrc = Path(m.__file__).read_text(encoding="utf-8")
@@ -102,19 +101,14 @@ def main():
     assert "分享链接" in m.KV, "下载屏未提示支持分享链接"
 
     # v1.8.1 真机修复：桌面 UA（防 302 到下载App引导页）+ 返回能力
-    assert "setUserAgentString(DESKTOP_UA)" in wsrc, \
-        "WebView 未设桌面 UA（移动 UA 被网盘跳下载客户端页）"
     assert "Windows NT" in weblogin.DESKTOP_UA, "桌面 UA 常量异常"
-    assert "setUseWideViewPort" in wsrc, "缺宽视口（PC 页无法自适应屏宽）"
-    assert hasattr(weblogin, "request_back"), "缺 request_back（返回键）"
+    assert hasattr(weblogin, "request_back"), "缺 request_back（返回键兼容）"
     assert hasattr(weblogin, "close_login"), "缺 close_login（✕ 返回）"
-    assert "canGoBack" in wsrc, "返回键缺网页后退语义"
-    assert "返回首页" in wsrc, "缺 ✕ 返回首页按钮"
     assert hasattr(m.PanBoostApp, "_on_key"), "缺返回键处理方法 _on_key"
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.1.1", "壳版本未升级到 3.1.0"
+    assert m.SHELL_VERSION == "3.2.0", "壳版本未升级到 3.2.0"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -133,11 +127,19 @@ def main():
         encoding="utf-8")
     assert "android.add_src" in spec and "PanWebViewClient.java" in spec, \
         "spec 未把 Java 桥接类编入 APK（android.add_src）"
-    assert "setWebViewClient" in wsrc, "未设置 WebViewClient（导航逃逸根因）"
-    assert "setOnKeyListener" in wsrc, "WebView 未挂返回键监听（抢焦点）"
-    assert "_UrlLoadingCallback" in wsrc, "缺导航回调 Python 实现"
-    assert "_BackKeyListener" in wsrc, "缺 WebView 返回键监听实现"
-    assert "browser_fallback_url" in wsrc, "intent:// 缺 fallback 解析"
+    # v3.2.0 独立 Activity 架构门禁
+    assert "LoginActivity.java" in spec, "spec 未编入 LoginActivity"
+    assert "android.add_activities = org.panboost.login.LoginActivity" \
+        in spec, "LoginActivity 未注册进 manifest（add_activities）"
+    login_java = Path(ROOT) / "mobile" / "java_classes" / "LoginActivity.java"
+    assert login_java.exists(), "缺 LoginActivity.java（独立登录页）"
+    lsrc = login_java.read_text(encoding="utf-8")
+    assert "extends Activity" in lsrc, "LoginActivity 未继承 Activity"
+    assert "setWebViewClient" in lsrc, "未设置 WebViewClient（导航逃逸根因）"
+    assert "setUseWideViewPort" in lsrc, "缺宽视口（PC 页无法自适应屏宽）"
+    assert "setUserAgentString" in lsrc, "WebView 未设桌面 UA"
+    assert "getUserAgentString" in lsrc, "缺 UA 读回验证（下载页诊断）"
+    assert "browser_fallback_url" in wsrc, "intent:// 缺 fallback 解析（规格）"
     assert "_decide_url" in wsrc, "缺导航白名单策略 _decide_url"
     ok1, _ = weblogin._decide_url("https://pan.baidu.com/")
     ok2, _ = weblogin._decide_url("market://details?id=x")
@@ -154,20 +156,19 @@ def main():
     # cancel → OnCancelListener 关层）
     assert 'os.environ.setdefault("SDL_ANDROID_TRAP' not in msrc, \
         "SDL trap 已废弃（v1.8.3 起吞手势返回，必须移除）"
-    assert "android.app.Dialog" in wsrc, "登录层未改全屏 Dialog 承载"
-    assert "setOnCancelListener" in wsrc, "Dialog 未挂取消监听（手势返回）"
-    assert "setCancelable(True)" in wsrc, "Dialog 未设可取消"
-    assert "dialog.dismiss()" in wsrc, "关闭未走 Dialog.dismiss"
-    assert "_CancelListener" in wsrc, "缺 _CancelListener 实现"
-    assert "DialogInterface$OnCancelListener" in wsrc, \
-        "取消监听接口签名异常"
-    assert "onPageStarted" in wsrc and "onPageFinished" in wsrc, \
-        "缺导航观测回调实现"
+    # v3.2.0：登录层已从 Dialog 弹窗改独立 Activity（用户反馈
+    # "登录页不能展示信息"根治）；返回键/手势由 onBackPressed
+    # 系统级处理（canGoBack 先退网页再退出）
+    assert 'autoclass("android.app.Dialog")' not in wsrc, "Dialog 弹窗承载应已移除（docstring 历史描述除外）"
+    assert "onBackPressed" in lsrc and "canGoBack" in lsrc, \
+        "缺系统返回键处理"
+    assert "onPageStarted" in lsrc and "onPageFinished" in lsrc, \
+        "缺导航观测实现（Java 侧）"
     assert "onPageStarted" in jtxt and "onPageFinished" in jtxt, \
         "Java 桥接类缺 onPageStarted/onPageFinished 转发"
     assert "MARKET_PREFIXES" in wsrc, "缺市场 URL 黑名单（302 落地守卫）"
     assert weblogin.MARKET_PREFIXES[0] == "market://", "黑名单常量异常"
-    assert "stopLoading" in wsrc, "onPageStarted 守卫未停载市场 URL"
+    assert "stopLoading" in lsrc, "onPageStarted 守卫未停载市场 URL"
     assert hasattr(weblogin, "nav_log"), "缺 nav_log 导出（真机诊断）"
     assert "_dump_nav_log" in msrc, "导航日志未落盘（诊断证据缺失）"
 
@@ -176,14 +177,11 @@ def main():
     #    官方文档明确 proxy 只存指针不持引用，GC 后 Java 回调必崩
     # ② 三色弹窗：floating 主题 Dialog 被 AOSP PhoneWindow 强制
     #    setLayout(WRAP_CONTENT, WRAP_CONTENT)，WebView 高度塌陷 0
-    assert '"click_cbs"' in wsrc, "按钮点击回调未持强引用（GC 后闪退）"
-    assert "click_close, click_done" in wsrc, "两个按钮回调未存元组"
-    assert "setLayout(-1, -1)" in wsrc, \
-        "Dialog 未显式全屏（floating 主题默认 wrap，WebView 塌陷）"
     assert "onRenderProcessGone" in jtxt, \
         "桥接类缺渲染进程崩溃处理（默认杀整个 App）"
-    assert "onRenderGone" in jtxt and "onRenderGone" in wsrc, \
-        "渲染崩溃回调未接通 Python 侧"
+    assert "onRenderGone" in jtxt and "onRenderGone" in lsrc, \
+        "渲染崩溃处理未接通（Java 侧自动关闭页面）"
+    assert "wv.destroy()" in lsrc, "onDestroy 未销毁 WebView（防泄漏）"
     assert "_on_ui" in msrc, "登录回调未调度回 Kivy 主线程（线程安全）"
     assert "Clock.schedule_once" in msrc, "缺 Clock 主线程调度"
 
@@ -194,20 +192,14 @@ def main():
     # ② 三色区域没字：show() 后 setLayout 真机仍被 floating 主题
     #    压回——非 floating 全屏主题构造 Dialog 根治；scheme 拦截
     #    后回退重载登录页防空白屏
-    assert "Theme_Light_NoActionBar_Fullscreen" in wsrc, \
-        "Dialog 未用非 floating 全屏主题构造（wrap 根因仍在）"
-    assert "android.R$style" in wsrc, "缺系统主题常量引用"
-    assert "LLParams(-1, 0, 1.0)" in wsrc, \
-        "WebView 未用 weight 布局（wrap 窗口下 MATCH_PARENT 塌陷 0）"
-    idx_add = wsrc.find('_step("WebView入容器"')
-    idx_load = wsrc.find('_step("加载登录页"')
-    assert 0 < idx_add < idx_load, "loadUrl 必须在 addView 之后（未 attach 不渲染）"
-    assert "def _toast" in wsrc, "缺 Toast 提示（凭证校验失败反馈）"
-    assert "_fallback_after_block" in wsrc, "缺拦截回退（空白屏根因）"
-    assert "_BLOCKED_HTML" in wsrc, "缺拦截说明页（替代空白屏）"
-    assert 'f"未检测到{title}的登录凭证' in wsrc, \
-        "_finish 缺凭证校验（游客 Cookie 误记账根因）"
-    assert "Toast.makeText" in wsrc, "Toast 未实现"
+    assert "MATCH_PARENT, 0, 1f" in lsrc, \
+        "WebView 未用 weight 布局（剩余高度稳占）"
+    assert "fallbackAfterBlock" in lsrc, "缺拦截回退（空白屏根因）"
+    assert "BLOCKED_HTML" in lsrc, "缺拦截说明页（替代空白屏）"
+    assert "未检测到登录凭证" in lsrc, \
+        "缺凭证校验（游客 Cookie 误记账根因，Java 侧）"
+    assert "Toast.makeText" in lsrc, "Toast 未实现（Java 侧）"
+    assert "checkAuth" in lsrc, "缺特征键校验逻辑（Java 侧）"
     # record_login 防御校验 + verified 语义（keys 命中=True / 空=False）
     assert '"verified": bool(keys)' in msrc, \
         "record_login verified 语义错误（特征命中应 True）"
@@ -230,17 +222,15 @@ def main():
     #    /web、移动 yun.139.com）
     # ③ 桌面 UA 独立设置 + getUserAgentString 读回验证（整块配置
     #    被吞是"下载页"根因）
-    assert "def _set_text" in wsrc, "缺文字三级保险（真机按钮无字根因）"
     assert 'autoclass("java.lang.String")' in wsrc, \
-        "文字设置缺 Java String 回退（pyjnius 重载解析失败通道）"
-    assert "def _set_text_color" in wsrc, "缺文字颜色双保险"
-    assert "Color.rgb" in wsrc, "缺 Color.rgb 回退（int 转换失败通道）"
-    assert " · 网页登录" in wsrc, "缺标题栏标题（标准登录页布局）"
-    assert "在下方页面登录账号" in wsrc, "缺提示条（操作引导）"
-    assert "已完成登录，保存 Cookie" in wsrc, "缺底部完成大按钮文案"
-    assert "C_DONE_BG" in wsrc and "C_BAR_BG" in wsrc, "缺集中配色常量"
-    assert "getUserAgentString" in wsrc, "缺 UA 读回验证（下载页诊断）"
-    assert "setUserAgentString(DESKTOP_UA)" in wsrc, "UA 独立设置缺失"
+        "启动参数缺 Java String 通道（pyjnius 重载解析失败防线）"
+    assert " · 网页登录" in lsrc, "缺标题栏标题（标准登录页布局）"
+    assert "在下方页面登录账号" in lsrc, "缺提示条（操作引导）"
+    assert "已完成登录，保存 Cookie" in lsrc, "缺底部完成大按钮文案"
+    # v3.2.0：文字/颜色全在 Java 侧（编译期类型保证，pyjnius
+    # setText/setTextColor 多重载静默失败通道整体消除）
+    assert "setText(" in lsrc and "setTextColor(" in lsrc, \
+        "Java 侧缺文字/颜色设置"
     assert m.PAN_BY_KEY["alipan"]["login"] == \
         "https://www.alipan.com/drive/", "阿里登录页仍是宣传页（非 /drive/）"
     assert m.PAN_BY_KEY["tianyi"]["login"] == \
@@ -254,29 +244,23 @@ def main():
     # ②退休列表延迟回收 ③dismiss/removeView 兜底
     assert "def _retire" in wsrc, "缺 _retire（退休列表防 GC 闪退）"
     assert '"retired": []' in wsrc, "缺退休列表字段"
-    assert "setWebViewClient(None)" in wsrc, \
-        "关闭前未解绑 WebViewClient（飞行回调闪退根因）"
-    assert "setOnKeyListener(None)" in wsrc, "关闭前未解绑返回键监听"
-    assert "setOnCancelListener(None)" in wsrc, "关闭前未解绑取消监听"
     assert "del rl[:-6]" in wsrc, "退休列表缺上限裁剪"
+    # v3.2.0：WebView 回调全在 Java 侧（无跨 JNI 飞行回调窗口），
+    # 结果回调对象经 _retire 延迟回收；Java 侧 onDestroy 兜底通知
+    assert "notifyCancel" in lsrc and "onDestroy" in lsrc, \
+        "缺 onDestroy 兜底取消通知（Python 状态机悬空防线）"
 
     # v1.9.2 真机根治："登录完成后点保存没反应"——凭证校验未通过
     # 时仅靠 Toast（部分真机 ROM 静默失败），登录层保持打开且无
     # 任何可见反馈。修复：按钮文字红色提示（三级保险通道）+
     # Toast 双保险 + Cookie 多域合并采集 + 全链路导航日志埋点
-    assert "def _merge_cookies" in wsrc, "缺多域 Cookie 合并"
-    assert "def _gather_cookies" in wsrc, "缺多域采集（漏关联域 Cookie）"
-    assert "def _nudge_button" in wsrc, "缺按钮文字反馈（无反应根因）"
-    assert "def _jstr" in wsrc, "缺 Java String 转换（Toast 双保险）"
-    assert "_jstr(msg)" in wsrc, "Toast 未走双保险通道"
-    assert "C_ERR" in wsrc and "DONE_BTN_TEXT" in wsrc, \
-        "缺提示配色/文案常量"
-    assert '_STATE["btn_done"]' in wsrc, "保存按钮未入强引用状态"
+    assert "def _merge_cookies" in wsrc, "缺多域 Cookie 合并（规格）"
+    assert "def _gather_cookies" in wsrc, "缺多域采集（规格）"
+    assert "def _jstr" in wsrc, "缺 Java String 转换（启动参数通道）"
     assert "cookie_urls=()" in wsrc, "open_login 缺多域参数"
     assert "cookie_urls=" in msrc, "main 未传网盘关联域列表"
-    assert '("click"' in wsrc, "缺点击埋点（真机诊断）"
-    assert '("check"' in wsrc, "缺校验结果埋点"
-    assert "已有Cookie键=" in wsrc, "校验日志缺 Cookie 键名记录"
+    assert "gatherCookies" in lsrc, "Java 侧缺多域 Cookie 采集"
+    assert "NUDGE_TXT" in lsrc, "缺按钮红字反馈（无反应根因，Java 侧）"
     assert "def current_cookies(url):" in wsrc, \
         "current_cookies 定义缺失（v1.9.1 曾被误删致点保存必失败）"
 
@@ -345,9 +329,11 @@ def main():
     assert "def open_browse" in wsrc, "weblogin 缺浏览模式"
     assert '"session": 0' in wsrc and '_STATE["session"] += 1' in wsrc, \
         "weblogin 缺会话总闸"
-    assert wsrc.count("_only_now") >= 6, "回调未全会话校验包装"
-    assert "time.sleep(3.0)" in wsrc, "poller 缺首轮延迟"
-    assert "BROWSE_BTN_TEXT" in wsrc and "browse=True" in wsrc, \
+    # v3.2.0：poller 在 Java 侧（Handler postDelayed），首轮 3s
+    # 防秒关页与启动渲染竞争的语义在 LoginActivity 落实
+    assert "postDelayed(pollRunnable, 3000)" in lsrc, \
+        "poller 缺首轮延迟（渲染竞争防线）"
+    assert "BROWSE_BTN" in lsrc and "bool(browse)" in wsrc, \
         "浏览模式按钮/分支缺失"
     for p in m.PANS:
         assert p.get("home"), f"{p['key']} 缺 home（网页版文件页）"

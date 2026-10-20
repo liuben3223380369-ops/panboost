@@ -6,19 +6,25 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 3.1.1
+version = 3.2.0
 
 requirements = python3,kivy,certifi,pyjnius
 
-# v1.8.2 导航守卫 + v1.8.3 onPageStarted 导航观测 + v1.8.4 渲染
-# 进程崩溃处理（onRenderProcessGone，不处理时系统杀整个 App）；
-# v1.8.5 登录凭证校验（auth_keys 特征命中才记账，防游客 Cookie
-# 误报"已登录"）+ Dialog 非 floating 全屏主题（根治三色弹窗）：
-# Java 桥接类（pyjnius 只能实现接口，不能继承 WebViewClient
-# 抽象类）——shouldOverrideUrlLoading 拦截 intent://market:// 等
-# 一切非 http/https 导航；onPageStarted 拦截 302 落地的应用市场页
-# （前者对服务端 302 重定向无效，Android 官方文档明确）
-android.add_src = java_classes/PanWebViewClient.java
+# v3.2.0 登录页独立 Activity 化（根治 Dialog 弹窗在部分真机
+# "层不出现/WebView 区空白"）：
+# - PanWebViewClient.java：WebViewClient 桥接（pyjnius 只能实现
+#   接口不能继承抽象类）——导航守卫/渲染崩溃处理
+# - LoginActivity.java：独立全屏登录/浏览页（Java 侧完整实现
+#   UI + Cookie 采集校验 + 自动轮询），Python 侧只启动+收结果
+# v1.8.2~v1.8.5 历史功能全部保留（导航守卫、onPageStarted 市场
+# 页拦截、onRenderProcessGone 防杀 App、auth_keys 特征校验）
+android.add_src = java_classes/PanWebViewClient.java, java_classes/LoginActivity.java
+
+# v3.2.0：LoginActivity 注册进 manifest（p4a --add-activity 渲染
+# <activity android:name> 到 <application> 内；无 intent-filter
+# 无需 exported 声明，继承 application 主题，默认主进程与
+# PythonActivity 共享 pyjnius 静态字段/回调）
+android.add_activities = org.panboost.login.LoginActivity
 
 # 固定 p4a 到稳定 release（hostpython 3.11.5）；master 的 hostpython
 # 3.14.2 会让纯依赖解析拉 cp314 android wheel → 平台不兼容报错

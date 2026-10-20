@@ -151,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.1.1"
+SHELL_VERSION = "3.2.0"
 
 
 def register_font():
@@ -1099,11 +1099,6 @@ BoxLayout:
                 bg_down: 0.118, 0.298, 0.761, 1
                 color: 1, 1, 1, 1
                 on_release: app.files_retry()
-            CardButton:
-                id: files_web_btn
-                text: '改用网页版'
-                font_size: sp(13)
-                on_release: app.files_open_web()
 
         Label:
             id: files_error_detail
@@ -1373,10 +1368,14 @@ class PanBoostApp(App):
                     self._browse_drive(pan_key)
                     return
                 except Exception as e:
+                    # v3.2.0：原生列表失败不再回退 WebView 网页版
+                    # （PC 页面真机触摸误选，用户明确反馈此坑），
+                    # 提示重新登录后直接返回
                     _dump_crash("browse_drive[%s]: " % pan_key)
                     self._home_status(
-                        f"原生列表打开失败（{type(e).__name__}），"
-                        "改开网页版")
+                        f"网盘列表打开失败（{type(e).__name__}）——"
+                        "会话可能过期，请到「账号」页删除后重新登录")
+                    return
             if pan.get("home") and weblogin.available():
                 try:
                     self._open_browse(pan_key)
@@ -2052,14 +2051,6 @@ class PanBoostApp(App):
         else:
             fid, name = "0", "我的网盘"
         self._fetch_drive(ctx["pan_key"], fid, name, push=False)
-
-    def files_open_web(self):
-        """加载失败改用网页版（v3.1.1）。"""
-        if self._drive_ctx is None:
-            return
-        pan_key = self._drive_ctx["pan_key"]
-        self._drive_ctx = None
-        self._open_browse(pan_key)
 
     def files_back(self):
         """文件屏返回（v3.1.0 双形态）。
