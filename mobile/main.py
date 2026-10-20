@@ -150,7 +150,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "2.0.0"
+SHELL_VERSION = "2.0.1"
 
 
 def register_font():
@@ -269,6 +269,24 @@ def _on_ui(fn):
     """
     try:
         Clock.schedule_once(lambda _dt: fn())
+    except Exception:
+        fn()
+
+
+def _on_ui_later(fn, delay=0.25):
+    """登录层完成/取消回调的延迟调度（v2.0.1 防闪退强化）。
+
+    v2.0.0 真机"完成登录后直接闪退"回归：on_done 在 Android UI
+    线程（手动点【已完成登录】，_run_ui 同步执行 _ui_close 后）
+    或轮询线程（特征命中）执行，其中新增的磁盘 IO 把回调线程拖
+    在关闭链里；dismiss 后 Chromium 渲染流水线仍有迟到 IPC 在
+    途，零延迟的 Clock 调度让 _after_login 的 UI 操作与关闭清理
+    重叠——低端机上撞出 v1.9.1 同款 SIGSEGV 窗口。对策：回调线
+    程零工作零 IO（全部挪入本调度）；延迟 0.25s 让 dismiss+解绑
+    +退休完全落地。
+    """
+    try:
+        Clock.schedule_once(lambda _dt: fn(), delay)
     except Exception:
         fn()
 
@@ -1087,16 +1105,20 @@ class PanBoostApp(App):
         err_txt = None
         if weblogin.available():
             def on_done(cookie, auto):
-                applog.info("login", "%s 登录完成（auto=%s）"
-                            % (pan_key, auto))
-                _dump_nav_log(pan_key)
-                _on_ui(lambda: self._after_login(pan_key, cookie, auto))
+                # v2.0.1：回调线程（Android UI 线程/轮询线程）零工作
+                # 零 IO——磁盘日志全部挪入延迟调度；0.25s 让 _ui_close
+                # 的解绑+dismiss+退休完全落地后再做 Kivy 操作
+                _on_ui_later(
+                    lambda: self._after_login(pan_key, cookie, auto))
 
             def on_cancel():
-                applog.info("login", "%s 登录已取消（未保存）" % pan_key)
-                _dump_nav_log(pan_key)
-                _on_ui(lambda: self._home_status(
-                    f"已返回（{pan['name']} 登录未保存）——随时可再点卡片登录"))
+                def _ui():
+                    applog.info("login", "%s 登录已取消（未保存）" % pan_key)
+                    _dump_nav_log(pan_key)
+                    self._home_status(
+                        f"已返回（{pan['name']} 登录未保存）——"
+                        "随时可再点卡片登录")
+                _on_ui_later(_ui)
 
             try:
                 weblogin.open_login(
@@ -1130,25 +1152,40 @@ class PanBoostApp(App):
         self.go("accounts")
 
     def _after_login(self, pan_key, cookie, auto):
-        pan = PAN_BY_KEY.get(pan_key)
-        if record_login(pan_key, cookie, auto):
-            self._build_pan_grid()
-            applog.info("login", "%s 已登录并永久保存（auto=%s）"
-                        % (pan_key, auto))
-            when = "自动检测" if auto else "手动确认"
-            if pan.get("auth_keys"):
-                self._home_status(
-                    f"{pan['name']} 已登录（{when}，Cookie 已永久保存）")
+        # v2.0.1：整体 try 兜底——Clock 回调异常会杀 Kivy 主循环
+        # （表象即闪退且无 crash-*.log）；IO 全部后置，先恢复
+        # v1.9.2 纯 UI 时序：记账→刷卡片→状态栏，磁盘日志最后补
+        try:
+            pan = PAN_BY_KEY.get(pan_key)
+            if record_login(pan_key, cookie, auto):
+                self._build_pan_grid()
+                when = "自动检测" if auto else "手动确认"
+                if pan.get("auth_keys"):
+                    self._home_status(
+                        f"{pan['name']} 已登录（{when}，Cookie 已永久保存）")
+                else:
+                    self._home_status(
+                        f"{pan['name']} 网页 Cookie 已保存（该网盘登录态不在"
+                        " Cookie 中，无法自动验证；下载时将自动尝试携带）")
+                applog.info("login", "%s 已登录并永久保存（auto=%s）"
+                            % (pan_key, auto))
             else:
+                applog.warn("login", "%s 凭证校验未通过（Cookie 未保存）"
+                            % pan_key)
                 self._home_status(
-                    f"{pan['name']} 网页 Cookie 已保存（该网盘登录态不在"
-                    " Cookie 中，无法自动验证；下载时将自动尝试携带）")
-        else:
-            applog.warn("login", "%s 凭证校验未通过（Cookie 未保存）"
-                        % pan_key)
-            self._home_status(
-                f"未检测到 {pan['name']} 的登录凭证——请先在页面完成"
-                "登录（已登录的浏览器内页面对象才能种下特征 Cookie）")
+                    f"未检测到 {pan['name']} 的登录凭证——请先在页面完成"
+                    "登录（已登录的浏览器内页面对象才能种下特征 Cookie）")
+            _dump_nav_log(pan_key)
+            applog.info("login", "%s 登录完成（auto=%s）"
+                        % (pan_key, auto))
+        except Exception as e:
+            _dump_crash("_after_login[%s]: " % pan_key)
+            try:
+                self._home_status(
+                    f"登录保存异常: {type(e).__name__}——Cookie 已在登录"
+                    "层采集，可到账号页手动粘贴（详情见 crash-*.log）")
+            except Exception:
+                pass
 
     # ---------- 账号管理 ----------
 

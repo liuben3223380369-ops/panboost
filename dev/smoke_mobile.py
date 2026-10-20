@@ -345,8 +345,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本2.0.0",
-          mobile_main.SHELL_VERSION == "2.0.0", mobile_main.SHELL_VERSION)
+    check("壳-壳版本2.0.1",
+          mobile_main.SHELL_VERSION == "2.0.1", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
@@ -838,6 +838,35 @@ def main():
     os.utime(old, (0, 0))
     _al.cleanup()
     check("壳-applog轮转清理超期旧文件", not old.exists(), "保留 7 天")
+
+    # ---- v2.0.1 登录完成闪退防御 ----
+    check("壳-延迟调度器_on_ui_later就绪",
+          hasattr(mobile_main, "_on_ui_later")
+          and "Clock.schedule_once(lambda _dt: fn(), delay)" in py_src
+          and '_dump_crash("_after_login' in py_src,
+          "回调线程零工作 + 0.25s 落地缓冲 + try 兜底")
+    mobile_main._on_ui_later(lambda: None)
+    _orig_rl = mobile_main.record_login
+
+    def _boom_login(*a, **k):
+        raise RuntimeError("smoke201")
+
+    mobile_main.record_login = _boom_login
+    try:
+        app._after_login("baidu", "BDUSS=xx", True)
+        ok201 = True
+    except Exception:
+        ok201 = False
+    finally:
+        mobile_main.record_login = _orig_rl
+    check("壳-_after_login异常兜底不穿透", ok201,
+          "Clock 回调异常不杀主循环（表象即闪退）")
+    _c201 = sorted(Path(tmp).glob("crash-*.log"))
+    _c201_txt = "\n".join(
+        p.read_text(encoding="utf-8") for p in _c201[-3:])
+    check("壳-_after_login兜底落crash日志",
+          "RuntimeError" in _c201_txt or "smoke201" in _c201_txt,
+          f"{len(_c201)} 份 crash log")
 
     app.rerun("http://example.com/rerun.bin")
     check("壳-历史点击重跑预填URL",

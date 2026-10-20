@@ -111,7 +111,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "2.0.0", "壳版本未升级到 2.0.0"
+    assert m.SHELL_VERSION == "2.0.1", "壳版本未升级到 2.0.1"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -308,6 +308,28 @@ def main():
     assert "self.root.current" not in msrc, "残留旧 root.current 直访"
     assert "139.com" in m.PAN_BY_KEY["yidong"]["domains"], \
         "移动 Cookie 域缺 139.com（新域名匹配不到）"
+
+    # v2.0.1 登录完成闪退防御（真机回归修复）：
+    # ①on_done/on_cancel 回调线程零工作零 IO（磁盘日志全部挪入
+    #   延迟调度——Android UI 线程不被拖在关闭链里，dismiss 后
+    #   Chromium 迟到 IPC 窗口不再被撞开）
+    # ②_on_ui_later 延迟 0.25s：解绑+dismiss+退休完全落地后才
+    #   做任何 Kivy 操作
+    # ③_after_login 整体 try 兜底（Clock 回调异常杀主循环=闪退）
+    assert hasattr(m, "_on_ui_later"), "缺 _on_ui_later 延迟调度"
+    assert "Clock.schedule_once(lambda _dt: fn(), delay)" in msrc, \
+        "_on_ui_later 未带延迟参数"
+    assert '_dump_crash("_after_login' in msrc, "_after_login 缺兜底"
+    assert "_on_ui_later(\n                    lambda: self._after_login" \
+        in msrc, "on_done 未走延迟调度"
+    assert "def _ui():" in msrc and "_on_ui_later(_ui)" in msrc, \
+        "on_cancel 未走延迟调度"
+    i_on_done = msrc.find("def on_done(cookie, auto):")
+    i_later = msrc.find("_on_ui_later", i_on_done)
+    assert i_on_done >= 0 and i_later > i_on_done, "on_done 结构异常"
+    seg201 = msrc[i_on_done:i_later]
+    assert "applog." not in seg201 and "_dump_nav_log" not in seg201, \
+        "on_done 回调线程仍有 IO（v2.0.1 必须零工作）"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG
