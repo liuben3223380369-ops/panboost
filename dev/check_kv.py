@@ -110,7 +110,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "1.9.2", "壳版本未升级到 1.9.2"
+    assert m.SHELL_VERSION == "2.0.0", "壳版本未升级到 2.0.0"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -275,6 +275,36 @@ def main():
     assert "已有Cookie键=" in wsrc, "校验日志缺 Cookie 键名记录"
     assert "def current_cookies(url):" in wsrc, \
         "current_cookies 定义缺失（v1.9.1 曾被误删致点保存必失败）"
+
+    # v2.0.0 结构与 UI 重构 + 统一错误日志：
+    # ①applog 模块（app-*.log 按天轮转 7 天 + ring + 全局异常钩子）
+    # ②五屏 UI（新增日志屏）+ 底部导航 5 Tab 高亮
+    # ③登录/下载/账号/异常全链路埋点
+    applog_path = Path(ROOT) / "mobile" / "applog.py"
+    assert applog_path.exists(), "缺统一日志模块 mobile/applog.py"
+    asrc = applog_path.read_text(encoding="utf-8")
+    for fn in ("def init", "def log", "def info", "def warn", "def error",
+               "def tail", "def ring_raw", "def cleanup",
+               "def install_hooks"):
+        assert fn in asrc, f"applog 缺 {fn}"
+    assert "threading.excepthook" in asrc, "applog 缺子线程异常钩子"
+    assert "import applog" in msrc, "main 未接入统一日志"
+    assert "applog.init" in msrc and "applog.install_hooks" in msrc, \
+        "main 缺日志初始化与钩子安装"
+    assert msrc.count("applog.") >= 15, "埋点不足（登录/下载/账号/异常）"
+    assert "class NavTab" in msrc, "缺底部导航 Tab 类"
+    assert "class LogsScreen" in msrc, "缺日志屏类"
+    for key in ("tab_home", "tab_download", "tab_accounts",
+                "tab_history", "tab_logs"):
+        assert key in m.KV, f"底部导航缺 {key}"
+    assert "id: sm" in m.KV, "KV 缺 ScreenManager id（root 布局重构）"
+    assert "name: 'logs'" in m.KV and "id: logs_lbl" in m.KV, \
+        "日志屏未挂载"
+    assert hasattr(m.PanBoostApp, "refresh_logs"), "缺 refresh_logs"
+    assert hasattr(m.PanBoostApp, "_cur"), "缺 _cur（root 布局适配）"
+    assert 'self.root.ids.sm.get_screen(name)' in msrc, \
+        "_scr 未适配新 root 结构"
+    assert "self.root.current" not in msrc, "残留旧 root.current 直访"
     assert "139.com" in m.PAN_BY_KEY["yidong"]["domains"], \
         "移动 Cookie 域缺 139.com（新域名匹配不到）"
 
