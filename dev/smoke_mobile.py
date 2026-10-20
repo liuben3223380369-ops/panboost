@@ -331,8 +331,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本1.8.4",
-          mobile_main.SHELL_VERSION == "1.8.4", mobile_main.SHELL_VERSION)
+    check("壳-壳版本1.8.5",
+          mobile_main.SHELL_VERSION == "1.8.5", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
@@ -356,6 +356,41 @@ def main():
           and "Clock.schedule_once" in py_src)
     mobile_main._on_ui(lambda: None)  # mock 下立即同步执行不炸
     check("壳-_on_ui冒烟可调用", True)
+
+    # ---- v1.8.5 修复"误记已登录 + 三色区域依旧没字" ----
+    check("壳-Dialog非floating全屏主题构造",
+          "Theme_Light_NoActionBar_Fullscreen" in wsrc
+          and "android.R$style" in wsrc,
+          "floating 主题强制 wrap 是三色弹窗根因，主题构造根治")
+    check("壳-WebView先入容器后加载且weight布局",
+          wsrc.index('_step("加载登录页"')
+          > wsrc.index('_step("WebView入容器"')
+          and "LLParams(-1, 0, 1.0)" in wsrc,
+          "未 attach 就 loadUrl 部分ROM不渲染；weight=1 稳占剩余高度")
+    check("壳-登录凭证校验（防游客Cookie误记已登录）",
+          'f"未检测到{title}的登录凭证' in wsrc
+          and "def _toast" in wsrc
+          and "Toast.makeText" in wsrc,
+          "特征键未命中 Toast 提示且登录层保持打开")
+    check("壳-凭证校验先于关层（未命中不关层不回调）",
+          wsrc.index('f"未检测到{title}的登录凭证')
+          < wsrc.index("done_once.set()", wsrc.index("def _finish")),
+          "校验失败 return 早于 done_once.set()")
+    check("壳-拦截回退防空白屏",
+          "_fallback_after_block" in wsrc
+          and "_BLOCKED_HTML" in wsrc,
+          "scheme/市场跳转被拦后回退重载登录页，2次后显示说明页")
+    check("壳-record_login防御性凭证校验+verified语义",
+          '"verified": bool(keys)' in py_src
+          and "Cookie已存·未验证" in py_src,
+          "特征命中=已登录；localStorage 型网盘不冒充已登录")
+    check("壳-特征键调研实锤（nfd白名单/天翼/微软）",
+          mobile_main.PAN_BY_KEY["quark"]["auth_keys"] == ["__pus", "__puus"]
+          and mobile_main.PAN_BY_KEY["uc"]["auth_keys"] == ["__pus", "__puus"]
+          and "COOKIE_LOGIN_USER" in
+          mobile_main.PAN_BY_KEY["tianyi"]["auth_keys"]
+          and "ESTSAUTH" in mobile_main.PAN_BY_KEY["onedrive"]["auth_keys"],
+          "夸克/UC=__pus+__puus；天翼=COOKIE_LOGIN_USER；OneDrive=ESTSAUTH")
 
     # ---- v1.8.3 Dialog 承载 + onPageStarted 导航观测 ----
     check("壳-登录层全屏Dialog承载（手势返回系统级）",
@@ -419,6 +454,31 @@ def main():
     app.del_account("baidu")
     check("壳-删除登录双清", "baidu" not in mobile_main.load_accounts()
           and "baidu.com" not in pb.load_cookie_store())
+
+    # v1.8.5 凭证校验语义：特征命中=已登录；游客 Cookie 拒记账；
+    # 无特征网盘（localStorage 型）记未验证
+    mobile_main.record_login("quark", "__pus=a; __puus=b", True)
+    qrec = mobile_main.load_accounts().get("quark", {})
+    check("壳-夸克特征命中记已登录",
+          qrec.get("verified") is True, str(qrec))
+    r_q2 = mobile_main.record_login("quark", "BAIDUID=xyz", True)
+    qrec2 = mobile_main.load_accounts().get("quark", {})
+    check("壳-夸克游客Cookie拒记账",
+          r_q2 is False and qrec2.get("len") == len("__pus=a; __puus=b"),
+          "特征未命中拒绝新记账（既有有效登录保留不清除）")
+    mobile_main.record_login("alipan", "cna=xyz", True)
+    arec = mobile_main.load_accounts().get("alipan", {})
+    check("壳-无特征网盘记未验证",
+          arec.get("verified") is False and arec.get("len") == 7,
+          str(arec))
+    _acc = mobile_main.load_accounts()
+    for _k in ("quark", "alipan"):
+        _acc.pop(_k, None)
+    mobile_main.save_accounts(_acc)
+    _st = pb.load_cookie_store()
+    for _d in ("quark.cn", "alipan.com"):
+        _st.pop(_d, None)
+    pb.save_cookie_store(_st)
 
     # v1.8.3 导航日志落盘：onPageStarted 记录 → 登录结束 nav-*.log
     _wl._STATE["nav_log"].clear()

@@ -204,8 +204,9 @@ python panboost.py download "直链" --cookie "..." -o ~/storage/downloads/movie
 
 ### 方式二：图形界面 APP（APK）
 
-仓库 `mobile/` 内置 Kivy 图形壳（v1.8.4 修复真机"三色弹窗无内容
-与点击闪退"；v1.8.3 系统级根治"跳下载App"与手势返回；v1.7.0 起
+仓库 `mobile/` 内置 Kivy 图形壳（v1.8.5 参考网盘解析项目根治
+"点卡片即误记已登录"与"三色区域无内容"；v1.8.4 修复三色弹窗
+与点击闪退；v1.8.3 系统级根治"跳下载App"与手势返回；v1.7.0 起
 浅色主题界面；v1.6.1 起自带中文字体，无乱码；v1.6.2 修复启动闪退），
 四屏界面：
 
@@ -229,7 +230,15 @@ python panboost.py download "直链" --cookie "..." -o ~/storage/downloads/movie
   v1.8.4 修复 Dialog 默认浮动主题把窗口压成"包内容"导致网页区域
   塌陷（显式全屏）与按钮回调对象被 Python 回收导致点击闪退
   （pyjnius 代理只存指针不持引用——官方文档），并加渲染进程崩溃
-  自动关层（不处理时系统会杀整个 App）
+  自动关层（不处理时系统会杀整个 App）；v1.8.5 参考网盘解析
+  开源项目（LinkSwift / netdisk-fast-download）根治登录误报：
+  ✓ 完成登录时必须命中该网盘登录特征 Cookie（百度 BDUSS、
+  夸克/UC __pus+__puus、天翼 COOKIE_LOGIN_USER 等）才记账，
+  未命中弹提示且登录页保持打开；阿里/迅雷/123 等登录态存于
+  localStorage 的网盘如实显示"Cookie已存·未验证"；Dialog 改用
+  非 floating 全屏主题构造（三色区域根治）、WebView 先挂载后
+  加载按权重分配高度、跳 App/市场被拦后自动回登录页（不再
+  空白屏）
 - **下载**：URL 输入（**直链或分享链接**——蓝奏/123 免登录解析，
   夸克自动带已登录 Cookie，多文件分享批量下载、可中途停止）、Cookie
   输入（留空自动匹配已登录网盘）、线程选择（auto 实测，手动 8~1024；

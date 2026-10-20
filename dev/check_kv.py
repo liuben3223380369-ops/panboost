@@ -110,7 +110,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "1.8.4", "壳版本未升级到 1.8.4"
+    assert m.SHELL_VERSION == "1.8.5", "壳版本未升级到 1.8.5"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -182,6 +182,43 @@ def main():
         "渲染崩溃回调未接通 Python 侧"
     assert "_on_ui" in msrc, "登录回调未调度回 Kivy 主线程（线程安全）"
     assert "Clock.schedule_once" in msrc, "缺 Clock 主线程调度"
+
+    # v1.8.5 真机修复（参考 LinkSwift / netdisk-fast-download 调研）：
+    # ① 误记已登录：游客 Cookie 非空 ≠ 已登录——_finish 关层前必须
+    #    校验 auth_keys 全部命中（未命中 Toast 提示、层保持打开），
+    #    record_login 防御性二次校验
+    # ② 三色区域没字：show() 后 setLayout 真机仍被 floating 主题
+    #    压回——非 floating 全屏主题构造 Dialog 根治；scheme 拦截
+    #    后回退重载登录页防空白屏
+    assert "Theme_Light_NoActionBar_Fullscreen" in wsrc, \
+        "Dialog 未用非 floating 全屏主题构造（wrap 根因仍在）"
+    assert "android.R$style" in wsrc, "缺系统主题常量引用"
+    assert "LLParams(-1, 0, 1.0)" in wsrc, \
+        "WebView 未用 weight 布局（wrap 窗口下 MATCH_PARENT 塌陷 0）"
+    idx_load = wsrc.find('_step("WebView入容器"')
+    idx_add = wsrc.find('_step("加载登录页"')
+    assert 0 < idx_add < idx_load, "loadUrl 必须在 addView 之后（未 attach 不渲染）"
+    assert "def _toast" in wsrc, "缺 Toast 提示（凭证校验失败反馈）"
+    assert "_fallback_after_block" in wsrc, "缺拦截回退（空白屏根因）"
+    assert "_BLOCKED_HTML" in wsrc, "缺拦截说明页（替代空白屏）"
+    assert 'f"未检测到{title}的登录凭证' in wsrc, \
+        "_finish 缺凭证校验（游客 Cookie 误记账根因）"
+    assert "Toast.makeText" in wsrc, "Toast 未实现"
+    # record_login 防御校验 + verified 语义（keys 命中=True / 空=False）
+    assert '"verified": bool(keys)' in msrc, \
+        "record_login verified 语义错误（特征命中应 True）"
+    assert "Cookie已存·未验证" in msrc, "卡片缺未验证三态显示"
+    # 特征键抽查（调研实锤）
+    assert m.PAN_BY_KEY["quark"]["auth_keys"] == ["__pus", "__puus"], \
+        "夸克特征键错误（nfd 实战白名单：__pus 持久 + __puus 签名）"
+    assert m.PAN_BY_KEY["uc"]["auth_keys"] == ["__pus", "__puus"], \
+        "UC 特征键错误（与夸克共用 UC_QUARK_COOKIE_KEYS 体系）"
+    assert "COOKIE_LOGIN_USER" in m.PAN_BY_KEY["tianyi"]["auth_keys"], \
+        "天翼缺 COOKIE_LOGIN_USER 特征"
+    assert "ESTSAUTH" in m.PAN_BY_KEY["onedrive"]["auth_keys"], \
+        "OneDrive 缺 ESTSAUTH 特征"
+    assert "lid" in m.PAN_BY_KEY["dropbox"]["auth_keys"], \
+        "Dropbox 缺 lid 特征"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

@@ -6,12 +6,14 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 1.8.4
+version = 1.8.5
 
 requirements = python3,kivy,certifi,pyjnius
 
 # v1.8.2 导航守卫 + v1.8.3 onPageStarted 导航观测 + v1.8.4 渲染
-# 进程崩溃处理（onRenderProcessGone，不处理时系统杀整个 App）：
+# 进程崩溃处理（onRenderProcessGone，不处理时系统杀整个 App）；
+# v1.8.5 登录凭证校验（auth_keys 特征命中才记账，防游客 Cookie
+# 误报"已登录"）+ Dialog 非 floating 全屏主题（根治三色弹窗）：
 # Java 桥接类（pyjnius 只能实现接口，不能继承 WebViewClient
 # 抽象类）——shouldOverrideUrlLoading 拦截 intent://market:// 等
 # 一切非 http/https 导航；onPageStarted 拦截 302 落地的应用市场页

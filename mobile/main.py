@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.8.4。
+"""PanBoost Android 图形壳（Kivy）v1.8.5。
+
+v1.8.5（真机反馈第五轮，参考网盘解析项目根治登录误报）：
+①"点卡片就记已登录"：record_login 此前只看 Cookie 非空——登录页
+  游客 Cookie（BAIDUID 等）也非空，点 ✓ 必误记。参考 LinkSwift /
+  netdisk-fast-download 的登录态判定思路（特征凭证命中或 API 业
+  务码，绝不信"Cookie 非空"）：weblogin._finish 关层前校验
+  auth_keys 全部命中（未命中 Toast 提示、登录层保持打开），
+  record_login 防御性二次校验；特征键按调研补齐（夸克/UC 的
+  __pus+__puus、天翼 COOKIE_LOGIN_USER、OneDrive ESTSAUTH、
+  Dropbox lid）。auth_keys 为空的网盘（阿里/迅雷/123/移动等
+  localStorage 型登录态）改记"Cookie 已存·未验证"，卡片与账号
+  页如实显示，绝不冒充"已登录"。
+②"三色区域依旧没字"：show() 后 setLayout 在真机仍被 floating
+  主题强制 wrap 压回——改用非 floating 全屏主题构造 Dialog
+  （Theme_Light_NoActionBar_Fullscreen）根治；WebView 先入容器
+  后加载 + weight 布局；scheme/市场跳转被拦后回退重载登录页
+  （2 次）仍被拦则显示说明页（替代空白屏）。
 
 v1.8.4（真机反馈第四轮，双根因源码实锤）：v1.8.3 点击网盘卡片后
 只弹"蓝灰黑三色小弹窗"、网页什么都没有，点击任何位置闪退——
@@ -116,7 +133,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "1.8.4"
+SHELL_VERSION = "1.8.5"
 
 
 def register_font():
@@ -344,13 +361,24 @@ def save_accounts(acc):
 
 
 def record_login(pan_key, cookie, auto):
-    """登录成功：写账簿 + 同步引擎 cookie store（下载自动匹配）。"""
+    """登录成功：写账簿 + 同步引擎 cookie store（下载自动匹配）。
+
+    v1.8.5 防御性凭证校验（weblogin._finish 已校验，此处兜底防
+    回退/异常路径）：有 auth_keys 的网盘特征未命中 → 返回 False
+    不记账（游客 Cookie 绝不冒充登录态）；无 auth_keys 的网盘
+    （localStorage 型登录态）记 "verified": False——Cookie 保存
+    供下载尝试，但卡片/账号页显示"Cookie 已存·未验证"。
+    """
     pan = PAN_BY_KEY.get(pan_key)
     if pan is None or not cookie:
         return False
+    keys = [k.lower() for k in pan.get("auth_keys") or []]
+    if keys and not all(f"{k}=" in cookie.lower() for k in keys):
+        return False
     acc = load_accounts()
     acc[pan_key] = {"name": pan["name"], "ts": int(time.time()),
-                    "auto": bool(auto), "len": len(cookie)}
+                    "auto": bool(auto), "len": len(cookie),
+                    "verified": bool(keys)}
     save_accounts(acc)
     store = pb.load_cookie_store()
     for domain in pan["domains"]:
@@ -849,9 +877,14 @@ class PanBoostApp(App):
         grid.clear_widgets()
         acc = load_accounts()
         for pan in PANS:
-            logged = pan["key"] in acc
-            if logged:
+            rec = acc.get(pan["key"])
+            if rec is not None and rec.get("verified", True):
                 txt = f"{pan['name']}\n[b][color=#16a34a]已登录[/color][/b]"
+            elif rec is not None:
+                # v1.8.5：Cookie 已保存但无法验证登录态（localStorage
+                # 型网盘）——如实显示，绝不冒充"已登录"
+                txt = (f"{pan['name']}\n"
+                       "[b][color=#b45309]Cookie已存·未验证[/color][/b]")
             else:
                 txt = f"{pan['name']}\n[sub]{pan['domains'][0]}[/sub]"
             btn = CardButton(
@@ -918,11 +951,17 @@ class PanBoostApp(App):
         if record_login(pan_key, cookie, auto):
             self._build_pan_grid()
             when = "自动检测" if auto else "手动确认"
-            self._home_status(
-                f"{pan['name']} 已登录（{when}，Cookie 已永久保存）")
+            if pan.get("auth_keys"):
+                self._home_status(
+                    f"{pan['name']} 已登录（{when}，Cookie 已永久保存）")
+            else:
+                self._home_status(
+                    f"{pan['name']} 网页 Cookie 已保存（该网盘登录态不在"
+                    " Cookie 中，无法自动验证；下载时将自动尝试携带）")
         else:
             self._home_status(
-                f"未捕获到 {pan['name']} 的 Cookie——请确认已完成登录后重试")
+                f"未检测到 {pan['name']} 的登录凭证——请先在页面完成"
+                "登录（已登录的浏览器内页面对象才能种下特征 Cookie）")
 
     # ---------- 账号管理 ----------
 
@@ -951,7 +990,9 @@ class PanBoostApp(App):
             name = (v.get("name") if isinstance(v, dict) else None) \
                 or pan.get("name") or k
             ts = v.get("ts", 0) if isinstance(v, dict) else 0
-            rows.append((name, "已登录网盘 · "
+            verified = v.get("verified", True) if isinstance(v, dict) else True
+            state = "已登录网盘" if verified else "Cookie 已存·登录未验证"
+            rows.append((name, state + " · "
                         + time.strftime("%Y-%m-%d", time.localtime(ts)), k))
         for domain, cookie in sorted(pb.load_cookie_store().items()):
             if any(domain in p["domains"] for p in PANS):

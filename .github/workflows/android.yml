@@ -61,7 +61,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.8.4-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.8.5-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -74,10 +74,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.4 双根因修复版）。' '真机反馈 v1.8.3 点击网盘卡片后只弹"蓝灰黑三色小弹窗"、网页什么都没有、点击任何位置闪退——经 pyjnius 官方文档与 AOSP 框架源码定位双根因，本次修复：' '①"三色弹窗无内容"——Dialog 用默认浮动主题时，Android 框架（PhoneWindow）会强制把窗口尺寸压成"包住内容"模式，网页区域高度被压成 0，只剩两个按钮和深色背景。修复：对话框显示后显式设置全屏尺寸，网页区域恢复正常，v1.8.2 已验证的登录页（含百度 passport）重新正常显示。' '②"点击就闪退"——顶部两个按钮的点击回调对象此前未持有 Python 强引用（pyjnius 官方文档明确：Java 代理只存指针不持引用，Python 引用计数归零立即回收，此后 Java 侧一点按钮就触发原生崩溃）。修复：全部回调对象强引用保存，按钮点击不再闪退。' '③两项加固——WebView 渲染进程崩溃时自动关闭登录层（不处理时系统会杀掉整个 App）；登录回调统一调度回主线程操作界面，消除跨线程崩溃隐患。' 'v1.8.3 的手势返回（全屏 Dialog 系统级处理）、302 市场页拦截（onPageStarted 守卫）、导航日志（nav-*.log）等此前修复全部保留。' 'v1.8.0 功能全量包含：分享链接直接下载（蓝奏云/123云盘免登录，夸克网盘需先登录），多文件分享自动批量下载、支持提取码（链接后加 ?code=xxxx）。首页 18 家国内外网盘入口，登录 Cookie 永久保存、下载自动携带；前台服务保活锁屏不断流。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v1.8.4"
+          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.5 登录误报根治版）。' '真机反馈 v1.8.4 部分网盘登录异常：点击卡片即被记为已登录（错误）、三色区域依旧无内容。''本次深入参考网盘解析开源项目（LinkSwift / netdisk-fast-download）的登录态判定实现，三项根治：' '①登录凭证校验——此前只要 Cookie 非空就记账，而登录页的游客 Cookie（如百度的 BAIDUID）也非空，导致一进登录页点完成就被误记已登录。''现在点✓完成时必须检测到该网盘的登录特征 Cookie（百度 BDUSS、夸克/UC 的 __pus+__puus、天翼 COOKIE_LOGIN_USER 等，来自开源网盘解析项目的实战特征键）才记账；''未检测到会弹出提示且登录页保持打开。阿里云盘/迅雷/123 等登录态存在网页 localStorage 而非 Cookie 的网盘，如实显示 Cookie已存·未验证，绝不冒充已登录。' '②三色区域根治——对话框改用非浮动全屏主题构造（Android 框架对浮动主题窗口强制包内容尺寸，网页区域高度被压成 0），窗口天生全屏；''网页控件先挂载后加载并按权重分配高度；网盘页跳转 App/应用市场被拦截后自动回到登录页（最多两次），仍失败则显示说明页，不再空白。' '③夸克/UC 特征键修正——__puus 一小时过期导致检测失败，改为 __pus+__puus 双特征（开源项目实战白名单）。' 'v1.8.4 的回调强引用（防点击闪退）、渲染进程崩溃防护、v1.8.3 的手势返回/市场页拦截全部保留。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v1.8.5"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.4" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.5" --latest --notes-file "$NOTES_FILE"
           fi

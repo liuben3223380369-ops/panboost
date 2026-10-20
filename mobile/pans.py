@@ -1,9 +1,25 @@
 """PanBoost 网盘清单（首页宫格数据，纯数据模块）。
 
-auth_keys: 登录成功特征 Cookie 键，命中自动完成；空 = 依赖用户点
-           "完成登录"按钮返回
+auth_keys: 登录成功特征 Cookie 键，全部命中才判定"已登录"并记账；
+           空 = 该网盘登录态不存于 Cookie（localStorage/token 型），
+           只能保存网页 Cookie 供下载尝试，无法自动验证登录
 domains:   Cookie 生效域（写入引擎 cookie store，下载时后缀匹配）
 share:     分享链接域名特征（引擎 resolve_share 识别用）
+
+特征键调研来源（2026-10-20，v1.8.5）：
+- 夸克/UC：netdisk-fast-download（qaiu）CookieUtils.UC_QUARK_COOKIE_KEYS
+  实战白名单 __pus/__kp/__kps/__ktd/__uid/__puus；__puus 为会话签名
+  （服务器 1 小时过期），__pus 为持久会话标识（刷新 __puus 的前提）
+  ——两者同时命中才是完整登录态，只查 __puus 会在过期后误判失败
+- 天翼云盘：COOKIE_LOGIN_USER（天翼网页登录后种下的用户会话，
+  开源社区签到/挂机项目通用判定键）
+- OneDrive：ESTSAUTH（login.live.com 微软账号会话 Cookie）
+- Dropbox：lid（Dropbox 登录设备标识 Cookie）
+- 百度/Google：v1.7.0 起实机验证有效（BDUSS/SAPISID）
+- 阿里云盘/迅雷/123/移动/微云/蓝奏/坚果云/MEGA 等：网页登录态存
+  localStorage 或 JWT token（LinkSwift 源码调研：123 用 authorization
+  JWT、迅雷走 captcha token、阿里走 refreshToken），Cookie 无法承载
+  登录态——auth_keys 留空，登录层照常可用但账簿记"未验证"
 """
 
 PANS = [
@@ -15,7 +31,7 @@ PANS = [
      "domains": ["baidu.com"], "auth_keys": ["BDUSS"],
      "share": ["pan.baidu.com/s/"]},
     {"key": "quark", "name": "夸克网盘", "login": "https://pan.quark.cn/",
-     "domains": ["quark.cn"], "auth_keys": ["__puus"],
+     "domains": ["quark.cn"], "auth_keys": ["__pus", "__puus"],
      "share": ["pan.quark.cn/s/"]},
     {"key": "alipan", "name": "阿里云盘", "login": "https://www.alipan.com/",
      "domains": ["alipan.com", "aliyundrive.com"], "auth_keys": [],
@@ -24,7 +40,7 @@ PANS = [
      "domains": ["weiyun.com"], "auth_keys": [],
      "share": ["weiyun.com/disk/", "share.weiyun.com/"]},
     {"key": "tianyi", "name": "天翼云盘", "login": "https://cloud.189.cn/",
-     "domains": ["189.cn"], "auth_keys": [],
+     "domains": ["189.cn"], "auth_keys": ["COOKIE_LOGIN_USER"],
      "share": ["cloud.189.cn/t/", "189.cn/t/"]},
     {"key": "yidong", "name": "移动云盘",
      "login": "https://caiyun.feixin.10086.cn/",
@@ -45,7 +61,7 @@ PANS = [
      "domains": ["jianguoyun.com"], "auth_keys": [],
      "share": ["jianguoyun.com/p/"]},
     {"key": "uc", "name": "UC网盘", "login": "https://drive.uc.cn/",
-     "domains": ["uc.cn"], "auth_keys": [],
+     "domains": ["uc.cn"], "auth_keys": ["__pus", "__puus"],
      "share": ["drive.uc.cn/s/"]},
     {"key": "gdrive", "name": "Google Drive",
      "login": "https://accounts.google.com/",
@@ -54,12 +70,12 @@ PANS = [
      "share": ["drive.google.com/file/d/", "drive.google.com/uc?id="]},
     {"key": "dropbox", "name": "Dropbox", "login": "https://www.dropbox.com/",
      "domains": ["dropbox.com", "dropboxusercontent.com"],
-     "auth_keys": [],
+     "auth_keys": ["lid"],
      "share": ["dropbox.com/s/"]},
     {"key": "onedrive", "name": "OneDrive",
      "login": "https://login.live.com/",
      "domains": ["live.com", "1drv.com", "sharepoint.com"],
-     "auth_keys": [],
+     "auth_keys": ["ESTSAUTH"],
      "share": ["1drv.ms/", "onedrive.live.com/"]},
     {"key": "mega", "name": "MEGA", "login": "https://mega.nz/",
      "domains": ["mega.nz"], "auth_keys": [],

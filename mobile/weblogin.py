@@ -7,6 +7,21 @@
 
 设计要点：
 - 所有 Android UI 操作经 runOnUiThread 执行（Kivy 主线程非 UI 线程）
+- v1.8.5 修复"点击卡片即被误记已登录 + 部分网盘三色区域无内容"：
+  ① 误记已登录：✓ 完成登录此前只看"Cookie 非空"——登录页游客
+    Cookie（BAIDUID 等）也非空，一点就记账（真机反馈实锤）。
+    参考网盘解析项目（LinkSwift / netdisk-fast-download）的登录态
+    判定思路：特征凭证命中才算登录。现在 _finish 在关层前校验
+    auth_keys 全部命中，未命中 Toast 提示且保持登录层打开
+  ② 三色区域：v1.8.4 的 show() 后 setLayout(-1,-1) 在真机上仍被
+    floating 主题的强制 wrap 压回（generateLayout 时机）——改用
+    非 floating 全屏主题构造 Dialog（Theme_Light_NoActionBar_
+    Fullscreen，API 1+），窗口天生 MATCH_PARENT，不依赖任何时机
+  ③ 空白屏兜底：登录 URL 302 到 app scheme/市场页被拦截后
+    WebView 停在空白——拦截后回退重载登录页（2 次），仍被拦则
+    显示说明页（避免"什么都没有"的黑/白屏）
+  ④ WebView 先入容器后加载（未 attach 就 loadUrl 在部分 ROM 上
+    不渲染）；高度改 weight=1（LinearLayout 标准剩余空间分配）
 - v1.8.4 修复真机"蓝灰黑三色弹窗无内容 + 点击闪退"：
   ① 闪退：_ClickListener 此前内联创建未持 Python 强引用——pyjnius
     官方文档明确 proxy 只存指针不持引用，CPython 引用计数归零立即
@@ -124,9 +139,38 @@ MARKET_PREFIXES = (
     "https://samsungapps.com", "https://app.mi.com",
     "https://www.coolapk.com",)
 
+# v1.8.5 拦截说明页：scheme/市场跳转被拦 2 次后显示（替代空白屏）
+_BLOCKED_HTML = (
+    "<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" "
+    "content=\"width=device-width,initial-scale=1\"></head>"
+    "<body style=\"font-family:sans-serif;padding:24px;background:#fff;"
+    "color:#334155\"><h2>已阻止跳转到网盘客户端</h2>"
+    "<p>该网盘页面试图打开 App 或应用市场，PanBoost 已在网页内拦截。</p>"
+    "<p>若登录页无法正常显示：请点左上角 ✕ 返回，到「账号」页选择该"
+    "网盘对应域名，在浏览器登录后粘贴 Cookie 保存即可。</p></body></html>")
+
 
 def _run_ui(fn):
     _activity().runOnUiThread(_Runnable(fn))
+
+
+def _toast(msg):
+    """UI 线程弹 Android Toast（v1.8.5 登录凭证校验提示）。
+
+    runOnUiThread 在 UI 线程调用时立即同步执行（AOSP 文档），
+    按钮 onClick 与 poller 线程两处调用都安全；任何失败静默
+    （Toast 不可用不应阻塞登录流程）。
+    """
+    def _show():
+        try:
+            Toast = autoclass("android.widget.Toast")
+            Toast.makeText(_activity(), msg, 0).show()
+        except Exception:
+            pass
+    try:
+        _run_ui(_show)
+    except Exception:
+        pass
 
 
 def _jcolor(argb):
@@ -386,6 +430,25 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     # / intent:// / market:// 导航全部逃逸到系统 intent 分发——真机
     # "跳到下载网盘APP界面"根因）。回调对象强引用存 _STATE 防 GC
     # （pyjnius 文档：proxy 被 Python GC 后 Java 回调崩溃）
+    # v1.8.5 拦截回退：登录 URL 302 到 app scheme 被拦后 WebView
+    # 停在空白（真机"三色区域无内容"的另一半根因）。拦截后回退
+    # 重载登录页（最多 2 次，防 302 循环），仍被拦则显示说明页
+    scheme_hits = {"n": 0}
+
+    def _fallback_after_block(kind, u):
+        log = _STATE["nav_log"]
+        log.append(("block", time.strftime("%H:%M:%S"),
+                    f"{kind}已拦截: " + u[:150]))
+        del log[:-50]
+        try:
+            if scheme_hits["n"] < 2:
+                scheme_hits["n"] += 1
+                wv.loadUrl(url)
+            else:
+                wv.loadData(_BLOCKED_HTML, "text/html", "utf-8")
+        except Exception:
+            pass
+
     def _handle_url(u):
         block, load = _decide_url(u, _parse_intent_uri)
         if load:
@@ -393,6 +456,9 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
                 wv.loadUrl(load)
             except Exception:
                 pass
+        elif block:
+            # 私有 scheme（quark:// alipan:// 等）：拦截 + 回退
+            _fallback_after_block("Scheme跳转", u)
         return block
 
     # v1.8.3 onPageStarted 导航观测（WebViewClient 回调在 UI 线程，
@@ -406,12 +472,11 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
                     u[:180]))
         del log[:-50]
         if started and u.lower().startswith(MARKET_PREFIXES):
-            log.append(("block", time.strftime("%H:%M:%S"),
-                        "市场URL已拦截: " + u[:150]))
             try:
                 wv.stopLoading()
             except Exception:
                 pass
+            _fallback_after_block("市场URL", u)
 
     # v1.8.4 渲染进程崩溃处理：onRenderProcessGone 不处理时系统
     # 默认杀掉整个 App（真机闪退路径之一）。记日志并自动关层
@@ -446,8 +511,12 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
                    wv.setFocusableInTouchMode(True)), critical=False)
     _step("挂载返回键监听", lambda: wv.setOnKeyListener(key_cb))
 
+    # v1.8.5：先入容器后加载（未 attach 就 loadUrl 在部分 ROM 上
+    # 不渲染）；高度 0 + weight 1.0 是 LinearLayout 分配剩余空间的
+    # 标准做法（比 MATCH_PARENT 更稳，即使外层窗口测量异常也能
+    # 拿到按钮栏以外的全部高度）
+    _step("WebView入容器", lambda: root.addView(wv, LLParams(-1, 0, 1.0)))
     _step("加载登录页", lambda: wv.loadUrl(url))
-    _step("WebView入容器", lambda: root.addView(wv, LayoutParams(-1, -1)))
 
     # v1.8.3 全屏 Dialog 承载（根治"无法返回"）：
     # Android 10+ 手势返回直接 cancel Dialog（系统标准行为），不再
@@ -455,7 +524,21 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     # trap 吞掉或退出整个 App，OnKeyListener 也收不到手势）。
     # OnCancelListener 是接口，pyjnius 可直接实现（_CancelListener）。
     Dialog = _step("加载Dialog类", lambda: autoclass("android.app.Dialog"))
-    dialog = _step("构造Dialog", lambda: Dialog(activity))
+
+    # v1.8.5 根治三色弹窗：默认 Dialog 是 floating 主题，AOSP
+    # PhoneWindow.generateLayout() 对 floating 窗口强制
+    # setLayout(WRAP_CONTENT, WRAP_CONTENT)——v1.8.4 在 show()
+    # 后补 setLayout(-1,-1) 真机仍被压回（wrap 测量已定型）。
+    # 用非 floating 全屏主题构造（Theme_Light_NoActionBar_
+    # Fullscreen，API 1+），窗口天生 MATCH_PARENT；主题构造失败
+    # 回退默认（保留 v1.8.4 行为兜底）
+    def _new_dialog():
+        try:
+            R_style = autoclass("android.R$style")
+            return Dialog(activity, R_style.Theme_Light_NoActionBar_Fullscreen)
+        except Exception:
+            return Dialog(activity)
+    dialog = _step("构造全屏Dialog", _new_dialog)
     cancel_cb = _step("构造取消监听", lambda: _CancelListener(on_cancel))
     _step("Dialog可取消", lambda: dialog.setCancelable(True))
     _step("挂载取消监听", lambda: dialog.setOnCancelListener(cancel_cb))
@@ -568,14 +651,24 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
     def _finish(auto):
         if done_once.is_set():
             return
-        done_once.set()
-        _STATE["done"] = True
-        _STATE["on_cancel"] = None
         cookie = None
         try:
             cookie = current_cookies(url)
         except Exception:
             pass
+        # v1.8.5 登录凭证校验（根治"点卡片就记已登录"）：登录页
+        # 游客 Cookie（BAIDUID 等）也非空，"Cookie 非空"绝不等于
+        # 已登录——参考网盘解析项目的判定思路，auth_keys 全部命中
+        # 才算登录成功。未命中：Toast 提示 + 登录层保持打开（不
+        # 关层、不回调、不记账，用户可继续完成登录后再点 ✓）
+        keys = [k.lower() for k in auth_keys]
+        if keys and not (cookie
+                         and all(f"{k}=" in cookie.lower() for k in keys)):
+            _toast(f"未检测到{title}的登录凭证，请先在页面完成登录")
+            return
+        done_once.set()
+        _STATE["done"] = True
+        _STATE["on_cancel"] = None
         try:
             _run_ui(_ui_close)
         except Exception:
