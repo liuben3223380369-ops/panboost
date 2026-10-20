@@ -6,10 +6,15 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 3.2.0
+version = 3.2.1
 
 requirements = python3,kivy,certifi,pyjnius
 
+# v3.2.1 修复登录完成返回后 UI 纯黑卡住（三防线）：①LoginActivity
+# onCreate 设 Translucent 主题（内容不透明视觉不变，但 PythonActivity
+# 不进 onStop——SDL surface 不销毁）②finish 前同步 detachWebView
+# （Chromium GPU 资源先于 EGL 重建释放）③main.py on_resume 强制
+# ask_update 重绘兜底。
 # v3.2.0 登录页独立 Activity 化（根治 Dialog 弹窗在部分真机
 # "层不出现/WebView 区空白"）：
 # - PanWebViewClient.java：WebViewClient 桥接（pyjnius 只能实现

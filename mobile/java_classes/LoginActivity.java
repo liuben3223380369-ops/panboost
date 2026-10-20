@@ -56,6 +56,20 @@ import java.util.Map;
  *
  * 通过 buildozer.spec android.add_src 编进 APK、
  * android.add_activities 注册进 manifest（p4a --add-activity）。
+ *
+ * v3.2.1 修复真机"登录完成返回后 UI 闪成纯黑卡住"：
+ * 根因——本页不透明全屏时 PythonActivity（Kivy 宿主）被完全遮挡
+ * 走 onStop，SDL surface 销毁；finish 返回时同进程 Chromium GPU
+ * 资源释放与 SDL EGL surface 重建竞争，surface 未恢复即黑屏。
+ * 三防线：
+ * ① onCreate 里 setTheme(Theme_Translucent_NoTitleBar)：内容
+ *    View 仍不透明全屏（视觉不变），但系统视为"部分遮挡"→
+ *    PythonActivity 只 onPause 不 onStop，SDL surface 不销毁
+ *    （防患于未然，主防线）
+ * ② finish 前同步 detachWebView（stopLoading + about:blank +
+ *    removeView + destroy）：Chromium GPU 资源在返回前释放完，
+ *    消除与 SDL EGL 重建的竞争（次防线）
+ * ③ Python 侧 on_resume 强制重绘（main.py ask_update，兜底）
  */
 public class LoginActivity extends Activity
         implements PanWebViewClient.UrlLoadingCallback {
@@ -188,6 +202,13 @@ public class LoginActivity extends Activity
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // v3.2.1 防线①：Translucent 主题必须在 setContentView 前设
+        // （PhoneWindow.generateLayout 从 theme 解析 windowIsTranslucent，
+        // 此后 window 非不透明 → 底下 PythonActivity 不进 onStop，
+        // SDL surface 不销毁）。内容 View 自身背景不透明，视觉仍是
+        // 全屏实心页面；windowIsFloating=false，Layout MATCH_PARENT
+        // 生效（不会复发 v1.8.4 floating wrap 塌陷）
+        setTheme(android.R.style.Theme_Translucent_NoTitleBar);
         super.onCreate(savedInstanceState);
         if (sInstance != null && !sInstance.isFinishing()) {
             // 防叠兜底（launchMode 默认 standard；Python 侧单实例
@@ -344,6 +365,9 @@ public class LoginActivity extends Activity
                 log("cberr", String.valueOf(t));
             }
         }
+        // v3.2.1 防线②：finish 前同步释放 WebView（GPU 资源在
+        // PythonActivity 恢复渲染前释放完，消除 EGL 重建竞争）
+        detachWebView();
         finish();
     }
 
@@ -363,7 +387,38 @@ public class LoginActivity extends Activity
                 log("cberr", String.valueOf(t));
             }
         }
+        // v3.2.1 防线②：与 notifyResult 同路径（✕/返回键/渲染崩溃/
+        // 系统回收都先释放 WebView 再 finish）
+        detachWebView();
         finish();
+    }
+
+    /**
+     * v3.2.1 防线②：同步释放 WebView（必须在 UI 线程）。
+     *
+     * 经典清理序列：stopLoading → about:blank（让 Chromium 放弃
+     * 当前页）→ 从容器摘除 → destroy。在 finish() 之前调用，
+     * 保证 Chromium 的 GPU 资源在 PythonActivity（Kivy/SDL）恢复
+     * EGL surface 重建之前释放完毕——同进程 GPU 上下文竞争正是
+     * "登录完成返回后黑屏卡住"的根因。幂等（wv 置 null）。
+     */
+    private void detachWebView() {
+        if (wv == null) {
+            return;
+        }
+        try {
+            wv.stopLoading();
+            wv.loadUrl("about:blank");
+            android.view.ViewGroup parent =
+                    (android.view.ViewGroup) wv.getParent();
+            if (parent != null) {
+                parent.removeView(wv);
+            }
+            wv.destroy();
+        } catch (Throwable t) {
+            log("detach", String.valueOf(t));
+        }
+        wv = null;
     }
 
     /** 返回键/手势（Activity 系统标准路径）：网页可后退先退网页。 */
@@ -594,6 +649,7 @@ public class LoginActivity extends Activity
             sInstance = null;
         }
         if (wv != null) {
+            // 兜底：detachWebView 未走过的极端路径（如 onCreate 早退）
             try {
                 wv.destroy();
             } catch (Throwable ignored) {

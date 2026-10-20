@@ -108,7 +108,8 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.2.0", "壳版本未升级到 3.2.0"
+    assert m.SHELL_VERSION == "3.2.1", "壳版本未升级到 3.2.1"
+
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -135,6 +136,16 @@ def main():
     assert login_java.exists(), "缺 LoginActivity.java（独立登录页）"
     lsrc = login_java.read_text(encoding="utf-8")
     assert "extends Activity" in lsrc, "LoginActivity 未继承 Activity"
+    # v3.2.1 真机"登录完成返回后 UI 纯黑卡住"三防线：
+    # ①Translucent 主题（PythonActivity 不 onStop，SDL surface 不销毁）
+    # ②finish 前同步 detachWebView（Chromium GPU 先于 EGL 重建释放）
+    # ③on_resume 强制 ask_update 重绘（surface 恢复事件丢失兜底）
+    assert "Theme_Translucent_NoTitleBar" in lsrc, \
+        "缺 Translucent 主题（黑屏主根因：不透明全屏遮挡致 onStop）"
+    assert "detachWebView" in lsrc, "缺 WebView 预释放（GPU 竞争防线）"
+    assert "about:blank" in lsrc, "detachWebView 缺 about:blank 清场"
+    assert "Window.canvas.ask_update()" in msrc, \
+        "缺 on_resume 强制重绘（黑屏兜底防线）"
     assert "setWebViewClient" in lsrc, "未设置 WebViewClient（导航逃逸根因）"
     assert "setUseWideViewPort" in lsrc, "缺宽视口（PC 页无法自适应屏宽）"
     assert "setUserAgentString" in lsrc, "WebView 未设桌面 UA"

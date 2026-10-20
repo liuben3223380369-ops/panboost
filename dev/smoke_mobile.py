@@ -385,8 +385,14 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.2.0",
-          mobile_main.SHELL_VERSION == "3.2.0", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.2.1",
+          mobile_main.SHELL_VERSION == "3.2.1", mobile_main.SHELL_VERSION)
+    check("壳-返回黑屏三防线（v3.2.1）",
+          "Theme_Translucent_NoTitleBar" in lsrc
+          and "detachWebView" in lsrc
+          and "about:blank" in lsrc
+          and "Window.canvas.ask_update()" in py_src,
+          "Translucent防onStop+GPU预释放+强制重绘")
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-结果回调双端防GC（Python退休+Java置null）",

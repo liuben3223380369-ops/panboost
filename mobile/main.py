@@ -151,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.2.0"
+SHELL_VERSION = "3.2.1"
 
 
 def register_font():
@@ -2117,7 +2117,16 @@ class PanBoostApp(App):
                     % (done, total))
 
     def _on_resume(self, *args):
-        """剪贴板识别（v3.0.0）：复制分享链接回到 App 自动填入。"""
+        """剪贴板识别（v3.0.0）+ 返回黑屏兜底（v3.2.1 防线③）。
+
+        v3.2.1：从登录页（独立 Activity）返回后强制重绘一帧——
+        部分 ROM 上 SDL surface 恢复事件（SIZE_CHANGED/RESTORED）
+        丢失时 Kivy 不重绘即"纯黑卡住"；ask_update 标记 canvas 脏，
+        下个 tick 强制重绘（Kivy 社区验证的标准黑屏修复）。"""
+        try:
+            Window.canvas.ask_update()
+        except Exception:
+            pass
         try:
             if Clipboard is None:
                 return
