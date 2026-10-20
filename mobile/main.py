@@ -150,7 +150,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "2.1.0"
+SHELL_VERSION = "3.0.0"
 
 
 def register_font():
@@ -179,6 +179,10 @@ from kivy.uix.button import Button  # noqa: E402
 from kivy.uix.label import Label  # noqa: E402
 from kivy.uix.screenmanager import Screen  # noqa: E402
 from kivy.uix.spinner import SpinnerOption  # noqa: E402
+try:  # v3.0.0 剪贴板识别（复制分享链接回 App 自动填入）
+    from kivy.core.clipboard import Clipboard  # noqa: E402
+except Exception:  # 冒烟/桌面无剪贴板后端
+    Clipboard = None
 
 
 class MainScreen(Screen):
@@ -221,6 +225,10 @@ class NavTab(Button):
     tab_bg = ListProperty(PRIMARY)
 
 
+class FilesScreen(Screen):
+    """分享文件列表屏（v3.0.0 YunX 式体验：勾选后下载所选）。"""
+
+
 class LogsScreen(Screen):
     """日志屏（v2.0.0）：统一日志实时查看（ERROR 红/WARN 橙着色）。"""
     pass
@@ -237,6 +245,38 @@ def external_files_dir():
     except Exception:
         pass
     return str(Path(__file__).parent / "downloads")
+
+
+_PUB_DL_OK = None
+
+
+def download_dir():
+    """下载输出目录（v3.0.0：优先公共 Download/PanBoost）。
+
+    公共目录文件管理器直接可见（用户诉求"下载的文件找不到"）；
+    Android 11+ 应用可创建并写自己在公共 Downloads 下的文件
+    （scoped storage 豁免，无需权限）。写测试失败（Android 10
+    及以下/特殊 ROM）回退 App 外部私有目录。测试结果缓存，
+    避免每次下载重复探测。
+    """
+    global _PUB_DL_OK
+    if _PUB_DL_OK is not None:
+        return _PUB_DL_OK
+    try:
+        from jnius import autoclass
+        Env = autoclass("android.os.Environment")
+        base = Env.getExternalStoragePublicDirectory(
+            Env.DIRECTORY_DOWNLOADS)
+        d = os.path.join(str(base.getAbsolutePath()), "PanBoost")
+        os.makedirs(d, exist_ok=True)
+        probe = os.path.join(d, ".write_test")
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+        _PUB_DL_OK = d
+    except Exception:
+        _PUB_DL_OK = external_files_dir()
+    return _PUB_DL_OK
 
 
 def _dump_crash(tag):
@@ -538,6 +578,7 @@ BoxLayout:
         AccountsScreen:
         HistoryScreen:
         LogsScreen:
+        FilesScreen:
     BoxLayout:
         id: navbar
         size_hint_y: None
@@ -922,6 +963,78 @@ BoxLayout:
                 height: max(self.texture_size[1], dp(24))
                 text_size: (self.width - dp(6), None)
                 halign: 'left'
+
+<FilesScreen>:
+    name: 'files'
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(14)
+        spacing: dp(6)
+        canvas.before:
+            Color:
+                rgba: 0.957, 0.965, 0.984, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(34)
+            spacing: dp(8)
+            CardButton:
+                text: '‹ 返回'
+                font_size: sp(14)
+                size_hint_x: None
+                width: dp(76)
+                on_release: app.go('download')
+            Label:
+                id: files_title
+                text: '分享文件'
+                font_size: sp(17)
+                bold: True
+                color: 0.118, 0.161, 0.231, 1
+                halign: 'left'
+                text_size: self.size
+                valign: 'middle'
+
+        Label:
+            id: files_info
+            text: ''
+            font_size: sp(11)
+            color: 0.396, 0.447, 0.533, 1
+            size_hint_y: None
+            height: dp(16)
+            text_size: self.size
+            halign: 'left'
+
+        ScrollView:
+            GridLayout:
+                id: files_box
+                cols: 1
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(4)
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(42)
+            spacing: dp(8)
+            CardButton:
+                id: files_sel_all
+                text: '全选 / 全不选'
+                font_size: sp(13)
+                size_hint_x: 0.4
+                on_release: app.toggle_all_files()
+            CardButton:
+                id: files_dl_btn
+                text: '下载所选'
+                font_size: sp(14)
+                bold: True
+                bg: 0.145, 0.388, 0.922, 1
+                bg_down: 0.118, 0.298, 0.761, 1
+                color: 1, 1, 1, 1
+                size_hint_x: 0.6
+                on_release: app.start_selected_downloads()
 """
 
 
@@ -937,6 +1050,9 @@ class PanBoostApp(App):
         self.worker = None
         self.logs = []
         self._log_serial = -1
+        # v3.0.0 分享文件列表（YunX 式勾选下载）
+        self._share_ctx = None
+        self._file_sel = []
         self._status = "待命"
         self._progress = 0.0
         self._btn_text = "开始下载"
@@ -953,6 +1069,11 @@ class PanBoostApp(App):
         # WebView 登录层打开时系统默认行为既不关层也不回退网页，
         # 用户会被困在登录层（v1.8.0 真机反馈）
         Window.bind(on_keyboard=self._on_key)
+        # v3.0.0 剪贴板识别：复制分享链接回到 App 自动填入
+        try:
+            self.bind(on_resume=self._on_resume)
+        except Exception:
+            pass
         Clock.schedule_interval(self._tick, 0.5)
         self._build_pan_grid()
         self._load_settings()
@@ -1401,7 +1522,7 @@ class PanBoostApp(App):
                 headers = pb.merge_cookie_header(
                     dict(headers), *probe.challenge_cookie)
                 self.log("已自动通过浏览器验证挑战")
-            out = Path(external_files_dir()) / _safe_name(
+            out = Path(download_dir()) / _safe_name(
                 share_name or probe.filename, url)
             out.parent.mkdir(parents=True, exist_ok=True)
             out_name = out.name
@@ -1486,7 +1607,11 @@ class PanBoostApp(App):
                              "status": status, "speed": round(speed)})
 
     def _run_share(self, resolver, url, cookie, choice, insecure):
-        """分享链接解析分发：单文件直下；多文件批量循环（可停止）。"""
+        """分享解析（v3.0.0 YunX 式）：解析出文件列表进勾选屏。
+
+        不再解析完直接全量下载——用户先在文件列表屏勾选要下的
+        文件（全选/单选切换），点「下载所选」才批量加速下载。
+        """
         try:
             self.log(f"识别到分享链接（{resolver}），解析中…")
             headers = {"Cookie": cookie} if cookie else {}
@@ -1504,7 +1629,120 @@ class PanBoostApp(App):
             resolved = [{"url": resolved, "name": None, "headers": None}]
         if isinstance(resolved, dict):
             resolved = [resolved]
-        total = len(resolved)
+        self._status = "解析完成，请勾选文件"
+        _on_ui(lambda: self._show_share_files(
+            resolved, url, cookie, choice, insecure))
+
+    def _show_share_files(self, files, url, cookie, choice, insecure):
+        """文件列表屏渲染（v3.0.0，主线程）。"""
+        try:
+            self._share_ctx = {"files": files, "url": url,
+                               "cookie": cookie, "choice": choice,
+                               "insecure": insecure}
+            self._file_sel = [True] * len(files)
+            self._render_files()
+            self.go("files")
+            self.log(f"解析出 {len(files)} 个文件——点行切换勾选，"
+                     "选好点底部「下载所选」")
+            applog.info("share", "分享解析 %s → %d 个文件（进勾选屏）"
+                        % (url[:96], len(files)))
+        except Exception as e:
+            _dump_crash("_show_share_files: ")
+            self._home_status(f"文件列表渲染失败: {type(e).__name__}")
+
+    def _render_files(self):
+        ids = self._scr("files").ids
+        box = ids.files_box
+        box.clear_widgets()
+        files = self._share_ctx["files"]
+        total = sum(int(f.get("size") or 0) for f in files)
+        ids.files_title.text = "分享文件（%d 个）" % len(files)
+        ids.files_info.text = (
+            "合计 %s · 点行切换选择" %
+            (pb.fmt_size(total) if total else "大小未知"))
+        for i, f in enumerate(files):
+            box.add_widget(self._file_row(i, f))
+        self._update_files_btn()
+
+    def _file_row(self, i, f):
+        name = f.get("name") or "文件"
+        size = int(f.get("size") or 0)
+        sel = self._file_sel[i]
+        mark = ("[b][color=#16a34a]☑[/color][/b]" if sel
+                else "[color=#94a3b8]☐[/color]")
+        btn = CardButton(
+            text="%s  %s\n[sub]%s · 点我切换[/sub]"
+                 % (mark, name,
+                    pb.fmt_size(size) if size else "未知大小"),
+            markup=True, font_size=sp(12), size_hint_y=None,
+            height=dp(48), halign="left", valign="middle",
+            bg=(0.831, 0.898, 0.949, 1) if sel
+            else (0.886, 0.906, 0.933, 1))
+        btn.bind(on_release=self._guard(self._toggle_file, i))
+        return btn
+
+    def _toggle_file(self, i):
+        """点行切换勾选（v3.0.0）。"""
+        try:
+            self._file_sel[i] = not self._file_sel[i]
+            self._render_files()
+        except Exception:
+            pass
+
+    def toggle_all_files(self):
+        """全选/全不选切换（v3.0.0）。"""
+        try:
+            if self._share_ctx is None:
+                return
+            all_on = all(self._file_sel) if self._file_sel else False
+            self._file_sel = [not all_on] * len(self._file_sel)
+            self._render_files()
+        except Exception:
+            pass
+
+    def _update_files_btn(self):
+        n = sum(1 for s in self._file_sel if s)
+        ids = self._scr("files").ids
+        ids.files_dl_btn.text = "下载所选（%d）" % n
+        if not self._file_sel:
+            ids.files_info.text = "（空分享）"
+
+    def start_selected_downloads(self):
+        """下载所选：批量加速下载勾选的文件（v3.0.0）。"""
+        try:
+            if self._share_ctx is None:
+                return
+            if self.worker is not None and self.worker.is_alive():
+                self._scr("files").ids.files_info.text = (
+                    "下载进行中，请等完成后再来")
+                return
+            sel = [f for f, s in zip(self._share_ctx["files"],
+                                     self._file_sel) if s]
+            if not sel:
+                self._scr("files").ids.files_info.text = "未勾选任何文件"
+                return
+            ctx = self._share_ctx
+            self.go("download")
+            self.log(f"开始下载所选 {len(sel)} 个文件"
+                     "（可在下载页停止）")
+            applog.info("download", "批量下载所选 %d 个（%s）"
+                        % (len(sel), ctx["url"][:96]))
+            self._progress = 0.0
+            self._cancel = False
+            if start_keepalive():
+                self.log("已开启前台保活（锁屏/后台下载不断流）")
+            self.worker = threading.Thread(
+                target=self._run_share_batch,
+                args=(sel, ctx["url"], ctx["cookie"], ctx["choice"],
+                      ctx["insecure"]), daemon=True)
+            self.worker.start()
+        except Exception as e:
+            _dump_crash("start_selected_downloads: ")
+            self._home_status(f"启动下载失败: {type(e).__name__}")
+
+    def _run_share_batch(self, files, url, cookie, choice, insecure):
+        """批量下载循环（worker 线程，v3.0.0 自 _run_share 拆出）。"""
+        total = len(files)
 
         def _one(f):
             ck = (f.get("headers") or {}).get("Cookie") or cookie
@@ -1513,19 +1751,37 @@ class PanBoostApp(App):
                                share_headers=f.get("headers"),
                                share_url=url)
 
-        if total == 1:
-            _one(resolved[0])
-            return
-        self.log(f"分享含 {total} 个文件，依次下载（可在下载页停止）")
         done = 0
-        for i, f in enumerate(resolved, 1):
+        for i, f in enumerate(files, 1):
             if getattr(self, "_cancel", False):
                 self.log(f"已停止（已完成 {done}/{total}）")
                 break
             self.log(f"[{i}/{total}] {f.get('name') or '文件'}")
+            self._status = f"[{i}/{total}] 下载中"
             _one(f)
             done = i
         self._status = f"批量完成 {done}/{total}"
+        applog.info("download", "批量下载结束 %d/%d" % (done, total))
+
+    def _on_resume(self, *args):
+        """剪贴板识别（v3.0.0）：复制分享链接回到 App 自动填入。"""
+        try:
+            if Clipboard is None:
+                return
+            txt = (Clipboard.get() or "").strip()
+            if not txt or len(txt) > 400:
+                return
+            if not pb.find_resolver(txt):
+                return  # 只识别支持的分享链接，不打扰普通复制
+            ids = self._scr("download").ids
+            if ids.url_input.text.strip() == txt:
+                return
+            ids.url_input.text = txt
+            self.log("已从剪贴板识别分享链接——点开始下载即可解析文件列表")
+            self._home_status("检测到分享链接，已自动填入下载页")
+            applog.info("clipboard", "剪贴板分享链接自动填入")
+        except Exception:
+            pass
 
     # ---------- 主线程侧（UI 刷新） ----------
 

@@ -104,10 +104,16 @@ class _Builder:
                          history_box=_Widget())
         logs = screen("logs", logs_lbl=_Widget(text="（暂无日志）"),
                       logs_status=_Widget())
+        files = screen("files", files_title=_Widget(text="分享文件"),
+                       files_info=_Widget(),
+                       files_box=_Widget(),
+                       files_sel_all=_Widget(text="全选 / 全不选"),
+                       files_dl_btn=_Widget(text="下载所选"))
         sm = types.SimpleNamespace()
         sm.current = "home"
         sm._screens = {"home": home, "download": download,
                        "accounts": accounts, "history": history,
+                       "files": files,
                        "logs": logs}
         sm.get_screen = sm._screens.get
         # v2.0.0：root 为 BoxLayout（ScreenManager + 底部导航栏）
@@ -181,7 +187,24 @@ kivy.metrics = metrics_mod
 kivy.properties = props_mod
 kivy.uix = uix_mod
 kivy.core = core_mod
+clip_mod = types.ModuleType("kivy.core.clipboard")
+
+
+class _Clipboard:
+    _val = ""
+
+    @staticmethod
+    def get():
+        return _Clipboard._val
+
+    @staticmethod
+    def copy(s):
+        _Clipboard._val = str(s)
+
+
+clip_mod.Clipboard = _Clipboard
 sys.modules.update({
+    "kivy.core.clipboard": clip_mod,
     "kivy": kivy, "kivy.app": app_mod, "kivy.clock": clock_mod,
     "kivy.lang": lang_mod, "kivy.metrics": metrics_mod,
     "kivy.properties": props_mod, "kivy.uix": uix_mod,
@@ -345,8 +368,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本2.1.0",
-          mobile_main.SHELL_VERSION == "2.1.0", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.0.0",
+          mobile_main.SHELL_VERSION == "3.0.0", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
@@ -797,9 +820,9 @@ def main():
     srv3.add_json("/api/share/info",
                   {"code": 0, "data": {"ShareKey": "k1", "ShareKeyID": 9}})
     srv3.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
-        {"FileId": 1, "FileName": "a.bin", "Size": len(d3a),
+        {"FileId": 1, "FileName": "sa.bin", "Size": len(d3a),
          "S3KeyTag": "t1", "IsDir": 0},
-        {"FileId": 2, "FileName": "b.bin", "Size": len(d3b),
+        {"FileId": 2, "FileName": "sb.bin", "Size": len(d3b),
          "S3KeyTag": "t2", "IsDir": 0}]}})
     srv3.add_json("/api/share/get", {"code": 0, "data": {"InfoList": [
         {"DownloadUrl": f"{srv3.url}/dl/a.bin"}]}},
@@ -813,17 +836,62 @@ def main():
     app._scr("download").ids.cookie_input.text = ""
     app.on_go()
     app.worker.join(timeout=120)
-    fa = list(Path(tmp).glob("a.bin"))
-    fb = list(Path(tmp).glob("b.bin"))
-    check("壳-123分享链接多文件下载完整",
-          fa and fb and fa[0].read_bytes() == d3a
-          and fb[0].read_bytes() == d3b)
+    # v3.0.0：解析后进文件列表屏（不再直接全量下载）
+    check("壳-分享解析进文件列表屏",
+          app.root.ids.sm.current == "files"
+          and "2 个" in app._scr("files").ids.files_title.text,
+          app._scr("files").ids.files_title.text)
+    rows300 = app._scr("files").ids.files_box.children
+    check("壳-文件列表行数与勾选态",
+          len(rows300) == 2 and all(app._file_sel),
+          "2 行默认全选")
+    check("壳-下载所选按钮计数",
+          "下载所选（2）" in app._scr("files").ids.files_dl_btn.text,
+          app._scr("files").ids.files_dl_btn.text)
+    # 取消第一个（sa.bin），只下载 sb.bin
+    app._toggle_file(0)
+    check("壳-点行切换勾选",
+          app._file_sel == [False, True]
+          and "下载所选（1）" in app._scr("files").ids.files_dl_btn.text,
+          str(app._file_sel))
+    app.start_selected_downloads()
+    app.worker.join(timeout=120)
+    fa = list(Path(tmp).glob("sa.bin"))
+    fb = list(Path(tmp).glob("sb.bin"))
+    check("壳-只下载勾选的文件",
+          (not fa) and fb and fb[0].read_bytes() == d3b,
+          "sa 未下载、sb 完整")
     h4 = mobile_main.load_history()
     check("壳-分享历史记录分享链接便于重跑",
           h4["items"] and h4["items"][0]["url"].startswith(
               "https://www.123pan.com/s/"),
           str(h4["items"][:1]))
+    # 全选场景：重跑全量下载
+    app._toggle_file(0)
+    app.start_selected_downloads()
+    app.worker.join(timeout=120)
+    fa = list(Path(tmp).glob("sa.bin"))
+    check("壳-全选批量下载完整",
+          fa and fa[0].read_bytes() == d3a, "sa.bin 完整")
     del os.environ["PANBOOST_RESOLVER_HOSTS"]
+
+    # ---- v3.0.0 剪贴板识别 + 公共目录回退 ----
+    mobile_main.Clipboard = types.SimpleNamespace(
+        get=lambda: "看看 https://www.123pan.com/s/k9 提取码 x1")
+    app._scr("download").ids.url_input.text = ""
+    app._on_resume()
+    check("壳-剪贴板分享链接自动识别填入",
+          app._scr("download").ids.url_input.text
+          == "看看 https://www.123pan.com/s/k9 提取码 x1",
+          app._scr("download").ids.url_input.text)
+    mobile_main.Clipboard = types.SimpleNamespace(get=lambda: "普通文字")
+    app._scr("download").ids.url_input.text = ""
+    app._on_resume()
+    check("壳-普通剪贴板内容不打扰",
+          app._scr("download").ids.url_input.text == "", "非链接不填入")
+    check("壳-下载目录回退私有目录（无 jnius）",
+          mobile_main.download_dir() == mobile_main.external_files_dir(),
+          "公共目录写测试失败时回退")
 
     app.del_account("127.0.0.1")
     check("壳-删除账号生效", "127.0.0.1" not in pb.load_cookie_store())

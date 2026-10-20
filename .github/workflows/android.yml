@@ -61,7 +61,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-2.1.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-3.0.0-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -74,10 +74,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（PanBoost v2.1.0 已登录直入我的网盘版）。' 'v2.1.0 修复：真机"已登录后点卡片闪退"——根因是已登录再开登录页时特征 Cookie 秒命中，登录层刚弹出就被关闭，与Chromium 启动渲染竞争崩溃。本版：①已登录卡片直达"我的网盘"网页版（带登录态浏览文件，长按复制文件/分享链接后点底部按钮回下载页加速——你要的"常驻账号里选东西下载"）；②会话总闸：一切迟到回调按会话校验直接忽略；③登录检测轮询首轮延迟 3 秒，杜绝秒关层。' 'v2.0.1 修复：真机完成登录后直接闪退（v1.9.1 同类回归）——登录完成/取消回调线程（Android UI 线程或轮询线程）改为零工作零 IO（磁盘日志全部挪入延迟调度）；0.25 秒延迟调度确保登录层 dismiss+回调解绑+对象退休完全落地后才执行界面操作；_after_login 整体异常兜底，回调异常不再穿透主循环。' '本版按用户需求整体重构结构与全部界面，并新增错误日志系统：' '①统一日志——新增 applog 模块：app-日期.log 按天轮转保留 7 天，记录登录/下载/账号全部关键操作与错误（ERROR 级自动附完整 traceback）；全局异常钩子覆盖主线程与子线程，任何未捕获异常不再静默；与既有 crash-*.log、nav-*.log 组成完整诊断体系。' '②UI 重构——五屏界面（新增日志屏）：底部导航栏五 Tab（首页/下载/账号/历史/日志）常驻高亮，取代此前各屏分散的返回按钮；日志屏实时查看运行日志（ERROR 红色 / WARN 橙色着色），真机无需连电脑即可自查问题；首页顶栏版本徽章、全屏统一卡片布局。' '③埋点——登录打开/完成/取消、下载开始/完成/失败/停止、账号保存/删除、UI 回调异常全部入日志。' 'v1.9.x 全部修复保留：登录完成闪退三层防御、点保存无反应根治（current_cookies 修复+按钮红色反馈+Cookie 多域采集）、登录页标准布局、登录地址实锤修正。' '异常请取应用目录 crash-*.log、nav-*.log 与 app-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v2.1.0"
+          printf '%s\n' 'GitHub Actions 云端自动构建的调试签名 APK（PanBoost v3.0.0 分享文件列表勾选下载版）。' 'v3.0.0 全新体验（对标 YunX 的核心交互）：粘贴分享链接 → App 内直接显示分享里的文件列表 → 勾选要下载的文件（全选/单选，最高 1024 线程加速）→ 下载到公共 Download/PanBoost 目录（文件管理器直接可见）。新增剪贴板识别：复制分享链接回到 App 自动填入。网盘登录（WebView）与已登录直入我的网盘（v2.1.0）全部保留。' 'v2.1.0 修复：真机"已登录后点卡片闪退"——根因是已登录再开登录页时特征 Cookie 秒命中，登录层刚弹出就被关闭，与Chromium 启动渲染竞争崩溃。本版：①已登录卡片直达"我的网盘"网页版（带登录态浏览文件，长按复制文件/分享链接后点底部按钮回下载页加速——你要的"常驻账号里选东西下载"）；②会话总闸：一切迟到回调按会话校验直接忽略；③登录检测轮询首轮延迟 3 秒，杜绝秒关层。' 'v2.0.1 修复：真机完成登录后直接闪退（v1.9.1 同类回归）——登录完成/取消回调线程（Android UI 线程或轮询线程）改为零工作零 IO（磁盘日志全部挪入延迟调度）；0.25 秒延迟调度确保登录层 dismiss+回调解绑+对象退休完全落地后才执行界面操作；_after_login 整体异常兜底，回调异常不再穿透主循环。' '本版按用户需求整体重构结构与全部界面，并新增错误日志系统：' '①统一日志——新增 applog 模块：app-日期.log 按天轮转保留 7 天，记录登录/下载/账号全部关键操作与错误（ERROR 级自动附完整 traceback）；全局异常钩子覆盖主线程与子线程，任何未捕获异常不再静默；与既有 crash-*.log、nav-*.log 组成完整诊断体系。' '②UI 重构——五屏界面（新增日志屏）：底部导航栏五 Tab（首页/下载/账号/历史/日志）常驻高亮，取代此前各屏分散的返回按钮；日志屏实时查看运行日志（ERROR 红色 / WARN 橙色着色），真机无需连电脑即可自查问题；首页顶栏版本徽章、全屏统一卡片布局。' '③埋点——登录打开/完成/取消、下载开始/完成/失败/停止、账号保存/删除、UI 回调异常全部入日志。' 'v1.9.x 全部修复保留：登录完成闪退三层防御、点保存无反应根治（current_cookies 修复+按钮红色反馈+Cookie 多域采集）、登录页标准布局、登录地址实锤修正。' '异常请取应用目录 crash-*.log、nav-*.log 与 app-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v3.0.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v2.1.0" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v3.0.0" --latest --notes-file "$NOTES_FILE"
           fi

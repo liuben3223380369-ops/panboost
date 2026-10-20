@@ -43,7 +43,8 @@ def main():
     root = m.Builder.load_string(m.KV)
 
     names = {s.name for s in root.ids.sm.screens}
-    assert names == {"home", "download", "accounts", "history", "logs"}, \
+    assert names == {"home", "download", "accounts", "history", "logs",
+                     "files"}, \
         f"屏幕缺失: {names}"
 
     need = {
@@ -55,6 +56,8 @@ def main():
                      "accounts_box"},
         "history": {"history_box", "rec_switch"},
         "logs": {"logs_lbl", "logs_status"},
+        "files": {"files_title", "files_info", "files_box",
+                  "files_sel_all", "files_dl_btn"},
     }
     for scr, ids in need.items():
         got = set(root.ids.sm.get_screen(scr).ids)
@@ -111,7 +114,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "2.1.0", "壳版本未升级到 2.1.0"
+    assert m.SHELL_VERSION == "3.0.0", "壳版本未升级到 3.0.0"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -351,6 +354,36 @@ def main():
     assert hasattr(m.PanBoostApp, "_open_browse"), "缺 _open_browse"
     assert "weblogin.open_browse(" in msrc, "pan_login 未分流浏览模式"
     assert "进入我的网盘" in msrc, "已登录卡片缺入口文案"
+
+    # v3.0.0 YunX 式体验（分享文件列表勾选下载 + 剪贴板 + 公共目录）：
+    # ①分享解析不再直接全量下载——先进文件列表屏勾选，
+    #   「下载所选」才批量加速（用户核心诉求）
+    # ②剪贴板识别：复制分享链接回 App 自动填入
+    # ③下载输出优先公共 Download/PanBoost（文件管理器可见）
+    assert "class FilesScreen" in msrc, "缺文件列表屏类"
+    assert "name: 'files'" in m.KV and "id: files_box" in m.KV, \
+        "文件列表屏未挂载"
+    assert "id: files_dl_btn" in m.KV and "id: files_sel_all" in m.KV, \
+        "文件屏缺操作按钮"
+    for fn in ("_show_share_files", "_run_share_batch",
+               "start_selected_downloads", "toggle_all_files",
+               "_toggle_file", "_on_resume", "download_dir"):
+        assert (hasattr(m.PanBoostApp, fn)
+                or fn == "download_dir" and "def download_dir" in msrc), \
+            f"缺 {fn}"
+    assert "def download_dir" in msrc, "缺公共下载目录函数"
+    assert "getExternalStoragePublicDirectory" in msrc, \
+        "未优先公共 Download 目录"
+    assert "Path(download_dir()) / _safe_name" in msrc, \
+        "下载输出未走公共目录"
+    assert "_on_ui(lambda: self._show_share_files(" in msrc, \
+        "分享解析未分流到文件列表屏"
+    assert "Clipboard.get" in msrc and "find_resolver(txt)" in msrc, \
+        "剪贴板识别缺失"
+    assert "on_release: app.toggle_all_files()" in m.KV, \
+        "全选按钮未绑定"
+    assert "on_release: app.start_selected_downloads()" in m.KV, \
+        "下载所选按钮未绑定"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG
