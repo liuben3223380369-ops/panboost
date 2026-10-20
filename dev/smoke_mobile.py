@@ -386,13 +386,21 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.2.2",
-          mobile_main.SHELL_VERSION == "3.2.2", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.2.3",
+          mobile_main.SHELL_VERSION == "3.2.3", mobile_main.SHELL_VERSION)
     check("壳-黑屏根治架构（v3.2.2 主 Activity 从不退场）",
           "addContentView" in lsrc and "handleBack" in lsrc
           and "closeLayer" in lsrc and "about:blank" in lsrc
           and "Window.canvas.ask_update()" in py_src,
           "层叠加主Activity内+关闭清场+强制重绘兜底")
+    check("壳-UI线程构建门禁（v3.2.3 根治 SDL 线程 NPE）",
+          "act.runOnUiThread" in lsrc
+          and "startOnUiThread" in lsrc
+          and "closeOnUiThread" in lsrc
+          and "new Handler(" not in lsrc
+          and "Looper.getMainLooper" not in lsrc
+          and "build-fail|" in lsrc,
+          "runOnUiThread 构建+零自建 Handler+失败通知防悬空")
     check("壳-自定义主入口PanMainActivity（manifest 换名）",
           "extends org.kivy.android.PythonActivity" in psrc
           and "LoginLayer.handleBack" in psrc,
@@ -623,8 +631,8 @@ def main():
     check("壳-浏览模式与会话总闸（v2.1.0→v3.2.0 Java 轮询）",
           "def open_browse" in wsrc210
           and '"session": 0' in wsrc210
-          and "postDelayed(sPollRunnable, 3000)" in lsrc
-          and "postDelayed(this, 1200)" in lsrc
+          and "wv.postDelayed(sPollRunnable, 3000)" in lsrc
+          and "wv.postDelayed(this, 1200)" in lsrc
           and "bool(browse)" in wsrc210,
           "浏览模式+会话总闸+Java poller首轮3s延迟")
     check("壳-18家网盘全部有home页",

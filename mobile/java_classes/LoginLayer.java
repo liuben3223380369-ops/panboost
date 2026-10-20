@@ -2,8 +2,6 @@ package org.panboost.login;
 
 import android.app.Activity;
 import android.content.Context;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -71,7 +69,6 @@ public final class LoginLayer {
     private static TextView sBtnDone;
     private static Callback sCallback;
     private static Activity sActivity;
-    private static Handler sHandler;
     private static String sLoginUrl;
     private static String[] sAuthKeys;
     private static String[] sCookieUrls;
@@ -131,15 +128,47 @@ public final class LoginLayer {
      * @param browse true=浏览模式（底部按钮"去下载"，不校验凭证）
      * @param cb 结果回调（onLoginResult / onLoginCancel，UI 线程）
      */
-    public static void start(Activity act, String url, String title,
-                             String authKeysCsv, String cookieUrlsCsv,
-                             String ua, boolean browse, Callback cb) {
+    public static void start(final Activity act, final String url,
+                             final String title, final String authKeysCsv,
+                             final String cookieUrlsCsv, final String ua,
+                             final boolean browse, final Callback cb) {
         if (act == null || url == null || url.length() == 0) {
             throw new IllegalArgumentException("login layer: no activity/url");
         }
+        // v3.2.3：全部构建必须发生在 UI 线程——pyjnius 静态方法从
+        // Kivy 的 SDL 线程直接调用，v3.2.2 在 SDL 线程构建视图 +
+        // addContentView + 构造消息调度器（读主循环内部队列），
+        // 真机（部分 ROM 上从 SDL 线程取主循环得 null）在调度器
+        // 构造里 NPE 崩溃（队列字段空引用）。runOnUiThread 回调在
+        // UI 线程执行时主循环必然存活（UI 框架本身在跑）；构建
+        // 失败经 onLoginCancel 通知，Python 状态机不悬空
+        act.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    startOnUiThread(act, url, title, authKeysCsv,
+                                    cookieUrlsCsv, ua, browse, cb);
+                } catch (Throwable t) {
+                    log("open", "build-fail|" + t);
+                    if (cb != null) {
+                        try {
+                            cb.onLoginCancel();
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /** 实际构建（仅 UI 线程调用；参数已由 start 校验）。 */
+    private static void startOnUiThread(Activity act, String url,
+                                        String title, String authKeysCsv,
+                                        String cookieUrlsCsv, String ua,
+                                        boolean browse, Callback cb) {
         if (sRoot != null) {
-            // 已有层：先按取消关闭（幂等），再开新层
-            closeLayer(true);
+            // 已有层：先按取消关闭（同线程同步），再开新层
+            closeOnUiThread(true);
         }
         sActivity = act;
         sCallback = cb;
@@ -149,7 +178,6 @@ public final class LoginLayer {
         sBrowse = browse;
         sFinished = false;
         sSchemeHits = 0;
-        sHandler = new Handler(Looper.getMainLooper());
         log("open", (browse ? "browse|" : "login|") + url);
         View root = buildViews(act, ua, title);
         act.addContentView(root, new ViewGroup.LayoutParams(
@@ -377,6 +405,25 @@ public final class LoginLayer {
      * （View 叠加不触发生命周期事件），Chromium 释放无竞争。
      */
     private static void closeLayer(boolean notify) {
+        // v3.2.3：removeView 与 WebView 销毁一律 UI 线程
+        //（runOnUiThread 在 UI 线程被调时同步执行，其余线程 post）
+        final Activity act = sActivity;
+        final boolean n = notify;
+        final Runnable task = new Runnable() {
+            @Override
+            public void run() {
+                closeOnUiThread(n);
+            }
+        };
+        if (act != null) {
+            act.runOnUiThread(task);
+        } else {
+            task.run();
+        }
+    }
+
+    /** 实际关闭（仅 UI 线程调用；幂等由 sRoot 判空保证）。 */
+    private static void closeOnUiThread(boolean notify) {
         if (sRoot == null) {
             return;
         }
@@ -388,7 +435,6 @@ public final class LoginLayer {
         sWebView = null;
         sBtnDone = null;
         sActivity = null;
-        sHandler = null;
         try {
             if (wv != null) {
                 wv.stopLoading();
@@ -603,7 +649,7 @@ public final class LoginLayer {
         return true;
     }
 
-    // ---- 特征 Cookie 自动检测轮询（Handler 主线程，首轮 3s）----
+    // ---- 特征 Cookie 自动检测轮询（View.postDelayed，首轮 3s）----
 
     private static final Runnable sPollRunnable = new Runnable() {
         @Override
@@ -616,26 +662,29 @@ public final class LoginLayer {
                 notifyResult(c, true);
                 return;
             }
-            Handler h = sHandler;
-            if (h != null) {
-                h.postDelayed(this, 1200);
+            WebView wv = sWebView;
+            if (wv != null) {
+                wv.postDelayed(this, 1200);
             }
         }
     };
 
     private static void startPolling() {
         // 首轮 3s：页面启动渲染窗口与"特征命中秒关层"绝不竞争
-        //（v2.1.0 教训）
-        if (!sBrowse && sAuthKeys.length > 0 && sHandler != null) {
-            sHandler.removeCallbacks(sPollRunnable);
-            sHandler.postDelayed(sPollRunnable, 3000);
+        //（v2.1.0 教训）。v3.2.3：View.postDelayed 挂到已 attach 的
+        // View 上，由 UI 框架内部的调度通道执行——不再自建调度
+        // 器，规避 ROM 上主循环取空返回的崩溃路径
+        WebView wv = sWebView;
+        if (!sBrowse && sAuthKeys.length > 0 && wv != null) {
+            wv.removeCallbacks(sPollRunnable);
+            wv.postDelayed(sPollRunnable, 3000);
         }
     }
 
     private static void stopPolling() {
-        Handler h = sHandler;
-        if (h != null) {
-            h.removeCallbacks(sPollRunnable);
+        WebView wv = sWebView;
+        if (wv != null) {
+            wv.removeCallbacks(sPollRunnable);
         }
     }
 
@@ -643,14 +692,13 @@ public final class LoginLayer {
 
     private static void nudgeButton(Activity act) {
         final TextView btn = sBtnDone;
-        Handler h = sHandler;
-        if (btn == null || h == null) {
+        if (btn == null) {
             return;
         }
         final CharSequence old = btn.getText();
         btn.setText(NUDGE_TXT);
         btn.setTextColor(0xFFDC2626);
-        h.postDelayed(new Runnable() {
+        btn.postDelayed(new Runnable() {
             @Override
             public void run() {
                 if (sFinished || btn != sBtnDone || sBtnDone == null) {

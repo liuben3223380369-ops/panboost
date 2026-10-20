@@ -108,7 +108,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.2.2", "壳版本未升级到 3.2.2"
+    assert m.SHELL_VERSION == "3.2.3", "壳版本未升级到 3.2.3"
 
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
@@ -145,6 +145,22 @@ def main():
     lsrc = layer_java.read_text(encoding="utf-8")
     assert "addContentView" in lsrc, \
         "登录层未用 addContentView 叠加（主 Activity 不退场的根基）"
+    # v3.2.3 真机崩溃修复门禁（日志实锤：SDL 线程构建 →
+    # getMainLooper() null → Handler 构造 NPE）：
+    # ①start 必须经 runOnUiThread 在 UI 线程构建
+    # ②自建 Handler 必须根除（轮询/按钮恢复全 View.postDelayed）
+    assert "act.runOnUiThread" in lsrc, \
+        "构建未切 UI 线程（SDL 线程构建是 NPE 崩溃根因）"
+    assert "startOnUiThread" in lsrc and "closeOnUiThread" in lsrc, \
+        "缺 UI 线程专用的构建/关闭方法"
+    assert "new Handler(" not in lsrc, \
+        "残留自建 Handler（getMainLooper 返回 null 的崩溃路径）"
+    assert "Looper.getMainLooper" not in lsrc, \
+        "残留 getMainLooper 调用（SDL 线程上部分 ROM 返回 null）"
+    assert "build-fail|" in lsrc, \
+        "缺构建失败通知（cb.onLoginCancel，Python 状态机悬空防线）"
+    assert "wv.postDelayed(sPollRunnable, 3000)" in lsrc, \
+        "轮询未挂 View.postDelayed（UI 框架内部 Handler）"
     assert "handleBack" in lsrc, "缺 handleBack（返回键入口）"
     assert "closeLayer" in lsrc, "缺 closeLayer（关闭路径）"
     assert "about:blank" in lsrc, "关闭序列缺 about:blank 清场"
@@ -354,8 +370,8 @@ def main():
         "weblogin 缺会话总闸"
     # v3.2.0：poller 在 Java 侧（Handler postDelayed），首轮 3s
     # 防秒关页与启动渲染竞争的语义在 LoginActivity 落实
-    assert "postDelayed(sPollRunnable, 3000)" in lsrc, \
-        "poller 缺首轮延迟（渲染竞争防线）"
+    assert "wv.postDelayed(sPollRunnable, 3000)" in lsrc, \
+        "poller 缺首轮延迟（渲染竞争防线，View.postDelayed）"
     assert "BROWSE_BTN" in lsrc and "bool(browse)" in wsrc, \
         "浏览模式按钮/分支缺失"
     for p in m.PANS:

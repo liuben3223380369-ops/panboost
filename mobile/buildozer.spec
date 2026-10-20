@@ -6,10 +6,17 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 3.2.2
+version = 3.2.3
 
 requirements = python3,kivy,certifi,pyjnius
 
+# v3.2.3 修复 v3.2.2 真机崩溃（日志实锤）：pyjnius 从 Kivy 的
+# SDL 线程直接调 LoginLayer.start，视图构建 + addContentView +
+# new Handler(Looper.getMainLooper()) 全跑 SDL 线程，部分 ROM 上
+# getMainLooper() 从该线程返回 null → Handler 构造 NPE 崩溃。
+# 修复：start 经 runOnUiThread 在 UI 线程构建（主 Looper 必然
+# 存活）；轮询/按钮恢复改 View.postDelayed（UI 框架内部
+# Handler），自建 Handler 彻底移除；closeLayer 同样 UI 线程化。
 # v3.2.2 登录层回归主 Activity 内（真机实锤 v3.2.0/v3.2.1 独立
 # LoginActivity 返回后 Kivy 主循环永不恢复→纯黑卡住）：
 # - LoginLayer.java：登录/浏览全屏 View 层（addContentView 叠加
