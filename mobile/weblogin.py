@@ -151,6 +151,7 @@ _STATE = {"root": None, "webview": None, "dialog": None, "poller": None,
           "on_close": None, "on_cancel": None, "done": False,
           "client_cb": None, "key_cb": None, "cancel_cb": None,
           "click_cbs": None,
+          "retired": [],
           "nav_log": [],
           "closed": threading.Event()}
 
@@ -700,17 +701,68 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _STATE["closed"].clear()
 
 
-def _ui_close():
-    """在 UI 线程关闭登录层（v1.8.3 Dialog.dismiss 为主，removeView 兜底）。
+def _retire(*keys):
+    """把 _STATE 指定字段的对象作为一批移入退休列表（v1.9.1 防回收闪退）。
 
-    dismiss 关闭整个 Dialog 窗口（contentView 随之卸下）；失败时回退
-    v1.8.2 的 removeView（防幽灵层）。必须清空全部强引用字段——
-    dialog/webview/client 回调被 Python GC 后 Java 侧回调会崩溃。
+    pyjnius 的 PythonJavaClass 被 Python GC 回收后，Java 侧持有的
+    接口指针随即失效——此后任何 Java 回调（如 Chromium 迟到的
+    onPageFinished）都是 native 崩溃。关闭登录层后对象不立即交给
+    GC，按批（一次关闭的全部对象为一个 dict）进退休列表保留最近
+    6 批（即最近 6 次登录，内存可忽略不计），彻底封死"关闭瞬间
+    飞行回调"窗口。
+    """
+    batch = {}
+    for k in keys:
+        v = _STATE.get(k)
+        if v is not None:
+            batch[k] = v
+        _STATE[k] = None
+    if batch:
+        rl = _STATE.setdefault("retired", [])
+        rl.append(batch)
+        del rl[:-6]
+
+
+def _ui_close():
+    """在 UI 线程关闭登录层（v1.9.1 根治"登录完成后直接闪退"）。
+
+    真机 v1.9.0 实锤：登录保存 Cookie 后 App 闪退。根因——
+    dismiss() 不会同步终止 Chromium 渲染流水线：登录成功后网盘页面
+    连续跳转，in-flight 的 onPageStarted/Finished/shouldOverride-
+    UrlLoading 等 IPC 回调仍排在 UI 线程消息队列中、于本函数之后
+    执行；旧版此刻把 client_cb 置 None，Python 对象被 GC，Java 桥
+    PanWebViewClient 对已回收对象回调 → SIGSEGV。v1.8.5 及之前
+    用户从未真正走通登录（色块/错 URL），此关闭路径在真机上首次
+    执行即暴露。
+
+    三层防御：
+    ① dismiss 前切断回调源：stopLoading + setWebViewClient(None)
+       + setOnKeyListener(None) + setOnCancelListener(None)——
+       AOSP WebViewClient 分发处判空，解绑后飞行回调不再进
+       Python（每步独立 try，个别 ROM 缺方法不影响其余）；
+    ② Dialog.dismiss 为主、removeView 兜底（v1.8.2 防幽灵层）；
+    ③ 全部对象（含 webview/dialog/root）经 _retire 进退休列表，
+       即使解绑在个别 ROM 上未生效，回调对象仍存活不会闪退。
     """
     dialog = _STATE["dialog"]
     root = _STATE["root"]
+    wv = _STATE["webview"]
     if dialog is None and root is None:
         return
+    if wv is not None:
+        for _unbind in (
+                lambda: wv.stopLoading(),
+                lambda: wv.setWebViewClient(None),
+                lambda: wv.setOnKeyListener(None)):
+            try:
+                _unbind()
+            except Exception:
+                pass
+    if dialog is not None:
+        try:
+            dialog.setOnCancelListener(None)
+        except Exception:
+            pass
     try:
         if dialog is not None:
             dialog.dismiss()
@@ -726,18 +778,12 @@ def _ui_close():
                     parent.removeView(root)
         except Exception:
             pass
-    finally:
-        _STATE["root"] = None
-        _STATE["webview"] = None
-        _STATE["dialog"] = None
-        _STATE["client_cb"] = None
-        _STATE["key_cb"] = None
-        _STATE["cancel_cb"] = None
-        _STATE["click_cbs"] = None
-        _STATE["closed"].set()
+    _retire("root", "webview", "dialog", "client_cb", "key_cb",
+            "cancel_cb", "click_cbs")
+    _STATE["closed"].set()
 
 
-def current_cookies(url):
+
     """取 WebView 里 url 域的 Cookie（含 httpOnly）。失败返回 None。"""
     box = {}
 
@@ -809,13 +855,11 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
         try:
             _run_ui(_ui_close)
         except Exception:
-            # post 失败（几乎不可能）：只重置状态；绝不在非 UI 线程
-            # 直接操作视图（Android 会抛 CalledFromWrongThread）
-            _STATE["root"] = None
-            _STATE["webview"] = None
-            _STATE["dialog"] = None
-            _STATE["cancel_cb"] = None
-            _STATE["click_cbs"] = None
+            # post 失败（几乎不可能）：只重置状态（对象入退休列表
+            # 防 GC 闪退）；绝不在非 UI 线程直接操作视图（Android
+            # 会抛 CalledFromWrongThread）
+            _retire("root", "webview", "dialog", "client_cb", "key_cb",
+                    "cancel_cb", "click_cbs")
             _STATE["closed"].set()
         poller = _STATE["poller"]
         if poller is not None:
@@ -932,12 +976,10 @@ def close_login():
     try:
         _run_ui(_ui_close)
     except Exception:
-        # post 失败：只重置状态，绝不在非 UI 线程操作视图
-        _STATE["root"] = None
-        _STATE["webview"] = None
-        _STATE["dialog"] = None
-        _STATE["cancel_cb"] = None
-        _STATE["click_cbs"] = None
+        # post 失败：只重置状态（对象入退休列表防 GC 闪退），
+        # 绝不在非 UI 线程操作视图
+        _retire("root", "webview", "dialog", "client_cb", "key_cb",
+                "cancel_cb", "click_cbs")
         _STATE["closed"].set()
     cb = _STATE.get("on_cancel")
     _STATE["on_cancel"] = None

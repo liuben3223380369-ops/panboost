@@ -110,7 +110,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "1.9.0", "壳版本未升级到 1.9.0"
+    assert m.SHELL_VERSION == "1.9.1", "壳版本未升级到 1.9.1"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -243,6 +243,18 @@ def main():
         "https://cloud.189.cn/web/", "天翼登录页非网页版 /web/ 路径"
     assert m.PAN_BY_KEY["yidong"]["login"] == \
         "https://yun.139.com/", "移动登录页仍是旧门户（跳 APP 引导）"
+
+    # v1.9.1 真机根治："登录完成后直接闪退"——关闭登录层时回调
+    # 强引用被立即清空，Python GC 后 Chromium in-flight 导航回调
+    # 经 Java 桥调用已回收对象 → SIGSEGV。三层防御：①解绑回调源
+    # ②退休列表延迟回收 ③dismiss/removeView 兜底
+    assert "def _retire" in wsrc, "缺 _retire（退休列表防 GC 闪退）"
+    assert '"retired": []' in wsrc, "缺退休列表字段"
+    assert "setWebViewClient(None)" in wsrc, \
+        "关闭前未解绑 WebViewClient（飞行回调闪退根因）"
+    assert "setOnKeyListener(None)" in wsrc, "关闭前未解绑返回键监听"
+    assert "setOnCancelListener(None)" in wsrc, "关闭前未解绑取消监听"
+    assert "del rl[:-6]" in wsrc, "退休列表缺上限裁剪"
     assert "139.com" in m.PAN_BY_KEY["yidong"]["domains"], \
         "移动 Cookie 域缺 139.com（新域名匹配不到）"
 

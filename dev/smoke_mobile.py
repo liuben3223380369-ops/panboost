@@ -332,8 +332,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本1.9.0",
-          mobile_main.SHELL_VERSION == "1.9.0", mobile_main.SHELL_VERSION)
+    check("壳-壳版本1.9.1",
+          mobile_main.SHELL_VERSION == "1.9.1", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
@@ -436,6 +436,43 @@ def main():
           == "https://yun.139.com/"
           and "139.com" in mobile_main.PAN_BY_KEY["yidong"]["domains"],
           "阿里 /drive、天翼 /web、移动 yun.139.com")
+    # ---- v1.9.1 根治"登录完成后直接闪退"（关闭时序三层防御） ----
+    check("壳-退休列表机制（防GC后Java回调闪退）",
+          "def _retire" in wsrc and '"retired": []' in wsrc
+          and "del rl[:-6]" in wsrc,
+          "回调对象延迟回收，封死 dismiss 后飞行回调窗口")
+    check("壳-关闭前解绑回调源（闪退根因）",
+          "setWebViewClient(None)" in wsrc
+          and "setOnKeyListener(None)" in wsrc
+          and "setOnCancelListener(None)" in wsrc,
+          "dismiss 不终止 Chromium 流水线，必须先切断回调源")
+
+    _saved = dict(_wl._STATE)
+    try:
+        _wl._STATE.update({
+            "root": "R1", "webview": "W1", "dialog": "D1",
+            "client_cb": "C1", "key_cb": "K1", "cancel_cb": "X1",
+            "click_cbs": ("A1", "B1"), "retired": []})
+        _wl._retire("root", "webview", "dialog", "client_cb", "key_cb",
+                    "cancel_cb", "click_cbs")
+        check("壳-_retire清空字段且一批对象全保留",
+              _wl._STATE["root"] is None
+              and _wl._STATE["click_cbs"] is None
+              and len(_wl._STATE["retired"]) == 1
+              and _wl._STATE["retired"][0].get("root") == "R1"
+              and _wl._STATE["retired"][0].get("click_cbs")
+              == ("A1", "B1"))
+        for _i in range(8):
+            _wl._STATE["root"] = f"R{_i}"
+            _wl._retire("root")
+        check("壳-退休列表上限裁剪（保留最近6批）",
+              len(_wl._STATE["retired"]) == 6
+              and _wl._STATE["retired"][-1] == {"root": "R7"},
+              "防重复登录内存累积")
+    finally:
+        _wl._STATE.clear()
+        _wl._STATE.update(_saved)
+
 
     # ---- v1.8.3 Dialog 承载 + onPageStarted 导航观测 ----
     check("壳-登录层全屏Dialog承载（手势返回系统级）",

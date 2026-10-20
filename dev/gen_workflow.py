@@ -64,7 +64,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.9.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-1.9.1-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -77,12 +77,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.9.0 登录页 UI 重构版）。' '真机反馈 v1.8.5 三大遗留：UC 打不开、夸克/阿里云盘打开是下载页、登录页顶部三个色块没有文字。' '本次真实联网调研（LinkSwift 油猴脚本 @match 清单 + AList 驱动文档）后根治：' '①登录页 UI 重构——标准登录页布局：深色标题栏（✕ 关闭 + 网盘名·网页登录 标题）、黄色操作提示条、网页区、底部通栏【已完成登录，保存 Cookie】大按钮（蓝底白字高对比）；文字设置三级保险（str 直传 → Java String 对象 → 失败写入导航日志），此前顶部按钮文字在部分真机不显示（只看到色块不知道是什么）。' '②登录地址修正——阿里云盘此前打开的是官网宣传页（含下载客户端引导），改为网页版真实路径 www.alipan.com/drive/；天翼云盘改为 cloud.189.cn/web/；移动云盘改为 yun.139.com（旧门户会跳 APP 引导）；移动 Cookie 域补 139.com。夸克/UC 域名经 LinkSwift 与 AList 双源确认无误。' '③桌面 UA 强化——此前 UA 设置与其他 WebView 配置捆在一起，任一项失败整块被静默跳过，真机仍用移动 UA 被网盘跳到下载页；现在 UA 独立设置并读回验证，结果写入导航日志可诊断。' '首页卡片升级三行：网盘名 + 状态（已登录/Cookie已存·未验证/点击网页登录）+ 域名。' 'v1.8.5 登录凭证校验（防游客 Cookie 误记已登录）、v1.8.4 回调强引用防闪退、v1.8.3 手势返回全部保留。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v1.9.0"
+          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.9.1 登录完成闪退根治版）。' '真机 v1.9.0 反馈：登录保存 Cookie 后 App 直接闪退。' '根因：关闭登录层时回调对象的强引用被立即清空，Python 回收对象后，Chromium 渲染流水线中仍在飞行的导航回调（onPageStarted/Finished 等）经 Java 桥调用已回收对象，触发 native 崩溃（SIGSEGV）。此前版本用户从未真正走通登录（色块看不懂/地址错误），此关闭路径首次被真机执行即暴露。' '修复（三层防御）：①关闭登录层前先 stopLoading 并解绑 WebViewClient、返回键监听、Dialog 取消监听——切断回调源，飞行回调不再进入 Python；②Dialog dismiss + removeView 兜底保留；③全部对象（WebView/Dialog/回调）移入退休列表延迟回收（保留最近 6 批），即使个别 ROM 解绑未生效也不会闪退。' 'v1.9.0 的登录页标准布局、登录地址实锤修正（阿里 /drive、天翼 /web、移动 yun.139.com）、桌面 UA 读回验证全部保留。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v1.9.1"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.9.0" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.9.1" --latest --notes-file "$NOTES_FILE"
           fi
 '''
 
