@@ -150,7 +150,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.0.0"
+SHELL_VERSION = "3.0.1"
 
 
 def register_font():
@@ -175,6 +175,7 @@ from kivy.lang import Builder  # noqa: E402
 from kivy.metrics import dp, sp  # noqa: E402
 from kivy.properties import (BooleanProperty, ListProperty,  # noqa: E402
                              StringProperty)
+from kivy.uix.boxlayout import BoxLayout  # noqa: E402
 from kivy.uix.button import Button  # noqa: E402
 from kivy.uix.label import Label  # noqa: E402
 from kivy.uix.screenmanager import Screen  # noqa: E402
@@ -223,6 +224,52 @@ class NavTab(Button):
     """
     active = BooleanProperty(False)
     tab_bg = ListProperty(PRIMARY)
+
+
+class FileRow(BoxLayout):
+    """文件行（v3.0.1 自研 tap 手势，对标 YunX combinedClickable）。
+
+    YunX 行用 Compose combinedClickable：Android 手势系统保证
+    down→up 位移超 touchSlop(8dp) 即取消点击、事件让给列表滚动，
+    滑动浏览永不误触。Kivy Button 的 on_release 只查抬手点是否
+    仍在按钮内——ScrollView 滚动时行随内容一起移动，手指与行
+    相对位置不变，collide 仍命中，拖动即误触发（真机"一碰就
+    选中"根因）。自研同等语义：down 只记录起点、不消费事件
+    （ScrollView 才能收到 move 起滚）；up 按屏幕绝对位移 ≤ 8dp
+    且按压 ≤ 0.55s 且抬手点仍在行内才切勾选；滑动/长按不触发。
+    """
+    mark = StringProperty("[color=#94a3b8]☐[/color]")
+    row_text = StringProperty("")
+    sel_bg = ListProperty((0.886, 0.906, 0.933, 1))
+
+    def __init__(self, idx=0, on_tap=None, **kw):
+        self.idx = idx
+        self._on_tap = on_tap
+        super().__init__(**kw)
+
+    def on_touch_down(self, touch):
+        try:
+            if (self.collide_point(*touch.pos)
+                    and not touch.is_mouse_scrolling):
+                touch.ud["pb_filerow"] = (id(self), touch.x, touch.y,
+                                          time.time())
+        except Exception:
+            pass
+        return False
+
+    def on_touch_up(self, touch):
+        try:
+            hit = touch.ud.get("pb_filerow")
+            if (hit is not None and hit[0] == id(self)
+                    and self.collide_point(*touch.pos)
+                    and abs(touch.x - hit[1]) <= dp(8)
+                    and abs(touch.y - hit[2]) <= dp(8)
+                    and time.time() - hit[3] <= 0.55
+                    and self._on_tap):
+                self._on_tap(self.idx)
+        except Exception:
+            pass
+        return False
 
 
 class FilesScreen(Screen):
@@ -1008,6 +1055,7 @@ BoxLayout:
             halign: 'left'
 
         ScrollView:
+            scroll_distance: dp(12)
             GridLayout:
                 id: files_box
                 cols: 1
@@ -1035,6 +1083,34 @@ BoxLayout:
                 color: 1, 1, 1, 1
                 size_hint_x: 0.6
                 on_release: app.start_selected_downloads()
+
+
+<FileRow>:
+    orientation: 'horizontal'
+    size_hint_y: None
+    height: dp(52)
+    padding: dp(10), dp(6)
+    spacing: dp(4)
+    canvas.before:
+        Color:
+            rgba: self.sel_bg
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    Label:
+        markup: True
+        text: root.mark
+        font_size: sp(17)
+        size_hint_x: None
+        width: dp(30)
+    Label:
+        markup: True
+        font_size: sp(12)
+        halign: 'left'
+        valign: 'middle'
+        text: root.row_text
+        text_size: self.size
+        color: 0.118, 0.161, 0.231, 1
 """
 
 
@@ -1658,7 +1734,7 @@ class PanBoostApp(App):
         total = sum(int(f.get("size") or 0) for f in files)
         ids.files_title.text = "分享文件（%d 个）" % len(files)
         ids.files_info.text = (
-            "合计 %s · 点行切换选择" %
+            "合计 %s · 轻点选择 · 上下滑动浏览" %
             (pb.fmt_size(total) if total else "大小未知"))
         for i, f in enumerate(files):
             box.add_widget(self._file_row(i, f))
@@ -1668,18 +1744,15 @@ class PanBoostApp(App):
         name = f.get("name") or "文件"
         size = int(f.get("size") or 0)
         sel = self._file_sel[i]
-        mark = ("[b][color=#16a34a]☑[/color][/b]" if sel
-                else "[color=#94a3b8]☐[/color]")
-        btn = CardButton(
-            text="%s  %s\n[sub]%s · 点我切换[/sub]"
-                 % (mark, name,
-                    pb.fmt_size(size) if size else "未知大小"),
-            markup=True, font_size=sp(12), size_hint_y=None,
-            height=dp(48), halign="left", valign="middle",
-            bg=(0.831, 0.898, 0.949, 1) if sel
+        return FileRow(
+            idx=i, on_tap=self._guard(self._toggle_file, i),
+            mark=("[b][color=#16a34a]☑[/color][/b]" if sel
+                  else "[color=#94a3b8]☐[/color]"),
+            row_text=("%s\n[sub]%s[/sub]"
+                      % (name,
+                         pb.fmt_size(size) if size else "未知大小")),
+            sel_bg=(0.831, 0.898, 0.949, 1) if sel
             else (0.886, 0.906, 0.933, 1))
-        btn.bind(on_release=self._guard(self._toggle_file, i))
-        return btn
 
     def _toggle_file(self, i):
         """点行切换勾选（v3.0.0）。"""

@@ -204,7 +204,9 @@ python panboost.py download "直链" --cookie "..." -o ~/storage/downloads/movie
 
 ### 方式二：图形界面 APP（APK）
 
-仓库 `mobile/` 内置 Kivy 图形壳（v3.0.0 分享文件列表勾选
+仓库 `mobile/` 内置 Kivy 图形壳（v3.0.1 手势修复版——轻点
+选择与滑动浏览彻底分离，列表滚动绝不误触选中；v3.0.0 分享
+文件列表勾选
 下载——粘贴分享链接先看到文件列表，勾选要下的文件再批量
 加速（最高 1024 线程）；剪贴板识别自动填入；下载输出到公共
 Download/PanBoost 目录，文件管理器直接可见；v2.1.0 已登录

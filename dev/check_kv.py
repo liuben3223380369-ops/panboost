@@ -114,7 +114,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.0.0", "壳版本未升级到 3.0.0"
+    assert m.SHELL_VERSION == "3.0.1", "壳版本未升级到 3.0.1"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -384,6 +384,20 @@ def main():
         "全选按钮未绑定"
     assert "on_release: app.start_selected_downloads()" in m.KV, \
         "下载所选按钮未绑定"
+
+    # v3.0.1 手势修复（真机"触碰就选中"）：滑动与选择分离，
+    # 对标 YunX combinedClickable 的 tap 判定——位移超阈值取消
+    # 点击、让给 ScrollView 滚动。Kivy Button 的 collide 判定在
+    # 滚动时行随内容移动仍命中（误触根因），已弃用
+    assert "class FileRow" in msrc, "缺自研 tap 手势行控件"
+    assert "<FileRow>:" in m.KV, "FileRow 缺 KV 视觉规则"
+    assert "scroll_distance: dp(12)" in m.KV, "滚动阈值未调优"
+    assert 'touch.ud["pb_filerow"]' in msrc, "缺 tap 起点记录"
+    assert "<= dp(8)" in msrc, "缺 touchSlop 位移阈值判定"
+    assert "on_release=self._guard(self._toggle_file" not in msrc, \
+        "仍用 Button on_release（滚动误触根因）"
+    assert "on_tap=self._guard(self._toggle_file" in msrc, \
+        "行未接 tap 回调"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

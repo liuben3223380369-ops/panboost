@@ -10,6 +10,7 @@
 import os
 import sys
 import tempfile
+import time
 import types
 from pathlib import Path
 
@@ -65,6 +66,9 @@ class _Widget:
         fn = self._bound.get(name) or self._on_release
         if callable(fn):
             fn(self, *args)
+
+    def collide_point(self, *args):
+        return True
 
     def clear_widgets(self):
         self.children = []
@@ -136,6 +140,8 @@ props_mod.ListProperty = lambda *a, **k: list(a[0]) if a else []
 props_mod.BooleanProperty = lambda *a, **k: bool(a[0]) if a else False
 props_mod.StringProperty = lambda *a, **k: str(a[0]) if a else ""
 uix_mod = types.ModuleType("kivy.uix")
+bl_mod = types.ModuleType("kivy.uix.boxlayout")
+bl_mod.BoxLayout = _Widget
 btn_mod = types.ModuleType("kivy.uix.button")
 btn_mod.Button = _Btn
 lbl_mod = types.ModuleType("kivy.uix.label")
@@ -208,7 +214,8 @@ sys.modules.update({
     "kivy": kivy, "kivy.app": app_mod, "kivy.clock": clock_mod,
     "kivy.lang": lang_mod, "kivy.metrics": metrics_mod,
     "kivy.properties": props_mod, "kivy.uix": uix_mod,
-    "kivy.uix.button": btn_mod, "kivy.uix.label": lbl_mod,
+    "kivy.uix.boxlayout": bl_mod, "kivy.uix.button": btn_mod,
+    "kivy.uix.label": lbl_mod,
     "kivy.core": core_mod, "kivy.core.text": text_mod,
     "kivy.core.window": window_mod,
     "kivy.uix.screenmanager": sm_mod, "kivy.uix.spinner": spin_mod,
@@ -368,8 +375,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.0.0",
-          mobile_main.SHELL_VERSION == "3.0.0", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.0.1",
+          mobile_main.SHELL_VERSION == "3.0.1", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
@@ -849,10 +856,37 @@ def main():
           "下载所选（2）" in app._scr("files").ids.files_dl_btn.text,
           app._scr("files").ids.files_dl_btn.text)
     # 取消第一个（sa.bin），只下载 sb.bin
-    app._toggle_file(0)
-    check("壳-点行切换勾选",
+    # v3.0.1 tap 手势：轻点（down→up 位移 < 8dp）切换勾选
+    row0 = app._scr("files").ids.files_box.children[0]
+    tap = types.SimpleNamespace(x=100.0, y=100.0, pos=(100.0, 100.0),
+                                ud={}, profile=[],
+                                is_mouse_scrolling=False)
+    row0.on_touch_down(tap)
+    tap.x, tap.y, tap.pos = 103.0, 102.0, (103.0, 102.0)
+    row0.on_touch_up(tap)
+    check("壳-轻点行切换勾选（tap 判定）",
           app._file_sel == [False, True]
           and "下载所选（1）" in app._scr("files").ids.files_dl_btn.text,
+          str(app._file_sel))
+    # 滑动（位移远超 8dp）不触发——滚动浏览与选择彻底分离
+    row0b = app._scr("files").ids.files_box.children[0]
+    swipe = types.SimpleNamespace(x=100.0, y=100.0, pos=(100.0, 100.0),
+                                  ud={}, profile=[],
+                                  is_mouse_scrolling=False)
+    row0b.on_touch_down(swipe)
+    swipe.x, swipe.y, swipe.pos = 180.0, 60.0, (180.0, 60.0)
+    row0b.on_touch_up(swipe)
+    check("壳-滑动不误触勾选（滚动与选择分离）",
+          app._file_sel == [False, True], str(app._file_sel))
+    # 长按（>0.55s）不触发
+    row0c = app._scr("files").ids.files_box.children[0]
+    hold = types.SimpleNamespace(x=100.0, y=100.0, pos=(100.0, 100.0),
+                                 ud={}, profile=[],
+                                 is_mouse_scrolling=False)
+    row0c.on_touch_down(hold)
+    time.sleep(0.6)
+    row0c.on_touch_up(hold)
+    check("壳-长按不误触勾选", app._file_sel == [False, True],
           str(app._file_sel))
     app.start_selected_downloads()
     app.worker.join(timeout=120)
@@ -866,8 +900,13 @@ def main():
           h4["items"] and h4["items"][0]["url"].startswith(
               "https://www.123pan.com/s/"),
           str(h4["items"][:1]))
-    # 全选场景：重跑全量下载
-    app._toggle_file(0)
+    # 全选场景：重跑全量下载（轻点第一行重新勾选）
+    row0d = app._scr("files").ids.files_box.children[0]
+    tap2 = types.SimpleNamespace(x=100.0, y=100.0, pos=(100.0, 100.0),
+                                 ud={}, profile=[],
+                                 is_mouse_scrolling=False)
+    row0d.on_touch_down(tap2)
+    row0d.on_touch_up(tap2)
     app.start_selected_downloads()
     app.worker.join(timeout=120)
     fa = list(Path(tmp).glob("sa.bin"))
