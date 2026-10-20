@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""PanBoost Android 图形壳（Kivy）v1.9.0。
-
-v1.9.0（真机反馈第六轮，登录层 UI 重构 + 网页版 URL 实锤修正）：
-①"顶部三个色块没有文字"：登录层顶部 ✕/✓ 双按钮的文字设置在
-  部分真机被静默吞掉（pyjnius 对 setText 多重载解析失败），用户
-  只看到色块不知道是什么。weblogin 重构为标准登录页布局：深色
-  标题栏（✕ + "网盘名 · 网页登录"）+ 黄色提示条 + WebView +
-  底部通栏"已完成登录"大按钮（蓝底白字 17sp 高对比）；文字
-  设置三级保险（str 直传 → java.lang.String 对象 → 失败记
-  nav_log）。
-②"夸克/阿里云盘打开是下载页"：登录 URL 落在产品宣传页——
-  LinkSwift @match 清单实锤网页版真实路径：阿里
-  www.alipan.com/drive/、天翼 cloud.189.cn/web/、移动云盘
-  yun.139.com（旧门户跳 APP 引导）；移动 domains 补 139.com。
-  夸克/UC 域名双源确认无误；桌面 UA 改独立设置 + 读回验证。
-③首页卡片三行化：网盘名 + 状态行（已登录/Cookie已存·未验证/
-  点击网页登录）+ 域名，操作引导一目了然。
+"""PanBoost Android 图形壳（Kivy）v1.8.5。
 
 v1.8.5（真机反馈第五轮，参考网盘解析项目根治登录误报）：
 ①"点卡片就记已登录"：record_login 此前只看 Cookie 非空——登录页
@@ -142,7 +126,6 @@ if IS_ANDROID:
 sys.path.insert(0, str(Path(__file__).parent))
 import panboost as pb  # noqa: E402
 import weblogin  # noqa: E402
-import applog  # noqa: E402
 from pans import PANS, PAN_BY_KEY  # noqa: E402
 from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
                    INK, SUB, GREEN)
@@ -150,7 +133,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "2.0.0"
+SHELL_VERSION = "1.8.5"
 
 
 def register_font():
@@ -173,8 +156,7 @@ from kivy.clock import Clock  # noqa: E402
 from kivy.core.window import Window  # noqa: E402
 from kivy.lang import Builder  # noqa: E402
 from kivy.metrics import dp, sp  # noqa: E402
-from kivy.properties import (BooleanProperty, ListProperty,  # noqa: E402
-                             StringProperty)
+from kivy.properties import ListProperty  # noqa: E402
 from kivy.uix.button import Button  # noqa: E402
 from kivy.uix.label import Label  # noqa: E402
 from kivy.uix.screenmanager import Screen  # noqa: E402
@@ -212,20 +194,6 @@ class CompactOption(SpinnerOption):
     pass
 
 
-class NavTab(Button):
-    """底部导航 Tab（v2.0.0）：active 态主色高亮，非 active 深色底。
-
-    视觉在 KV 规则实现，Python 只声明属性（mock 零副作用）。
-    """
-    active = BooleanProperty(False)
-    tab_bg = ListProperty(PRIMARY)
-
-
-class LogsScreen(Screen):
-    """日志屏（v2.0.0）：统一日志实时查看（ERROR 红/WARN 橙着色）。"""
-    pass
-
-
 def external_files_dir():
     """应用外部私有目录（scoped storage 下免权限，用户可取文件）。"""
     try:
@@ -255,8 +223,6 @@ def _dump_crash(tag):
             f.write(tag + traceback.format_exc())
     except Exception:
         pass
-    # v2.0.0：crash 同步进统一日志（日志屏实时可见）
-    applog.error("crash", tag)
 
 
 def _on_ui(fn):
@@ -490,19 +456,6 @@ KV = """
             radius: [dp(9)]
     color: 0.118, 0.161, 0.231, 1
 
-<NavTab>:
-    background_normal: ''
-    background_down: ''
-    background_color: 0, 0, 0, 0
-    canvas.before:
-        Color:
-            rgba: self.tab_bg if self.active else (0.071, 0.09, 0.141, 1)
-        Rectangle:
-            pos: self.pos
-            size: self.size
-    color: (0.97, 0.98, 1, 1) if self.active else (0.616, 0.663, 0.741, 1)
-    font_size: sp(12)
-
 <CompactOption>:
     height: dp(30)
     font_size: sp(12)
@@ -511,47 +464,11 @@ KV = """
     background_color: 0.145, 0.388, 0.922, 1 if self.state == 'down' else 0.96
     color: 1, 1, 1, 1
 
-BoxLayout:
-    orientation: 'vertical'
-    ScreenManager:
-        id: sm
-        MainScreen:
-        DownloadScreen:
-        AccountsScreen:
-        HistoryScreen:
-        LogsScreen:
-    BoxLayout:
-        id: navbar
-        size_hint_y: None
-        height: dp(54)
-        padding: dp(6), dp(5)
-        spacing: dp(6)
-        canvas.before:
-            Color:
-                rgba: 0.071, 0.09, 0.141, 1
-            Rectangle:
-                pos: self.pos
-                size: self.size
-        NavTab:
-            id: tab_home
-            text: '首页'
-            on_release: app.go('home')
-        NavTab:
-            id: tab_download
-            text: '下载'
-            on_release: app.go('download')
-        NavTab:
-            id: tab_accounts
-            text: '账号'
-            on_release: app.go('accounts')
-        NavTab:
-            id: tab_history
-            text: '历史'
-            on_release: app.go('history')
-        NavTab:
-            id: tab_logs
-            text: '日志'
-            on_release: app.go('logs')
+ScreenManager:
+    MainScreen:
+    DownloadScreen:
+    AccountsScreen:
+    HistoryScreen:
 
 <MainScreen>:
     name: 'home'
@@ -566,27 +483,13 @@ BoxLayout:
                 pos: self.pos
                 size: self.size
 
-        BoxLayout:
+        Label:
+            text: 'PanBoost'
+            font_size: sp(24)
+            bold: True
+            color: 0.118, 0.161, 0.231, 1
             size_hint_y: None
-            height: dp(34)
-            spacing: dp(8)
-            Label:
-                text: 'PanBoost'
-                font_size: sp(24)
-                bold: True
-                color: 0.118, 0.161, 0.231, 1
-                size_hint_x: 0.6
-                halign: 'left'
-                text_size: self.size
-                valign: 'middle'
-            Label:
-                text: 'v' + app.shell_version
-                font_size: sp(11)
-                color: 0.396, 0.447, 0.533, 1
-                size_hint_x: 0.4
-                halign: 'right'
-                text_size: self.size
-                valign: 'middle'
+            height: dp(30)
 
         Label:
             text: '点击网盘卡片登录（Cookie 永久保存，下载自动携带）'
@@ -637,15 +540,20 @@ BoxLayout:
                 pos: self.pos
                 size: self.size
 
-        Label:
-            text: '下载'
-            font_size: sp(20)
-            bold: True
-            color: 0.118, 0.161, 0.231, 1
+        BoxLayout:
             size_hint_y: None
-            height: dp(30)
-            halign: 'left'
-            text_size: self.size
+            height: dp(34)
+            spacing: dp(8)
+            CardButton:
+                text: '首页'
+                font_size: sp(13)
+                size_hint_x: 0.3
+                on_release: app.go('home')
+            Label:
+                text: '下载'
+                font_size: sp(17)
+                bold: True
+                color: 0.118, 0.161, 0.231, 1
 
         TextInput:
             id: url_input
@@ -717,6 +625,19 @@ BoxLayout:
             valign: 'middle'
             text_size: self.size
 
+        BoxLayout:
+            size_hint_y: None
+            height: dp(38)
+            spacing: dp(8)
+            CardButton:
+                text: '我的账号'
+                font_size: sp(13)
+                on_release: app.go('accounts')
+            CardButton:
+                text: '下载历史'
+                font_size: sp(13)
+                on_release: app.go('history')
+
         ScrollView:
             Label:
                 id: log_lbl
@@ -741,15 +662,20 @@ BoxLayout:
                 pos: self.pos
                 size: self.size
 
-        Label:
-            text: '我的账号'
-            font_size: sp(20)
-            bold: True
-            color: 0.118, 0.161, 0.231, 1
+        BoxLayout:
             size_hint_y: None
-            height: dp(30)
-            halign: 'left'
-            text_size: self.size
+            height: dp(34)
+            spacing: dp(8)
+            CardButton:
+                text: '首页'
+                font_size: sp(13)
+                size_hint_x: 0.3
+                on_release: app.go('home')
+            Label:
+                text: '我的账号'
+                font_size: sp(17)
+                bold: True
+                color: 0.118, 0.161, 0.231, 1
 
         Label:
             text: '已登录网盘永久记录在此。新登录请回首页点网盘卡片；也可手动粘贴任意站点 Cookie。点击条目删除。'
@@ -820,15 +746,16 @@ BoxLayout:
             size_hint_y: None
             height: dp(34)
             spacing: dp(8)
+            CardButton:
+                text: '首页'
+                font_size: sp(13)
+                size_hint_x: 0.3
+                on_release: app.go('home')
             Label:
                 text: '下载历史（永久记录）'
-                font_size: sp(17)
+                font_size: sp(16)
                 bold: True
                 color: 0.118, 0.161, 0.231, 1
-                size_hint_x: 0.7
-                halign: 'left'
-                text_size: self.size
-                valign: 'middle'
             Switch:
                 id: rec_switch
                 size_hint_x: None
@@ -843,6 +770,10 @@ BoxLayout:
                 text: '清空历史'
                 font_size: sp(13)
                 on_release: app.clear_history()
+            CardButton:
+                text: '返回'
+                font_size: sp(13)
+                on_release: app.go('home')
 
         ScrollView:
             GridLayout:
@@ -851,59 +782,6 @@ BoxLayout:
                 size_hint_y: None
                 height: self.minimum_height
                 spacing: dp(4)
-
-<LogsScreen>:
-    name: 'logs'
-    BoxLayout:
-        orientation: 'vertical'
-        padding: dp(14)
-        spacing: dp(6)
-        canvas.before:
-            Color:
-                rgba: 0.957, 0.965, 0.984, 1
-            Rectangle:
-                pos: self.pos
-                size: self.size
-
-        BoxLayout:
-            size_hint_y: None
-            height: dp(34)
-            spacing: dp(8)
-            Label:
-                text: '运行日志'
-                font_size: sp(20)
-                bold: True
-                color: 0.118, 0.161, 0.231, 1
-                size_hint_x: 0.7
-                halign: 'left'
-                text_size: self.size
-                valign: 'middle'
-            CardButton:
-                text: '刷新'
-                font_size: sp(13)
-                size_hint_x: 0.3
-                on_release: app.refresh_logs()
-
-        Label:
-            id: logs_status
-            text: ''
-            font_size: sp(11)
-            color: 0.396, 0.447, 0.533, 1
-            size_hint_y: None
-            height: dp(30)
-            text_size: self.size
-            halign: 'left'
-
-        ScrollView:
-            Label:
-                id: logs_lbl
-                text: '（暂无日志）'
-                markup: True
-                font_size: sp(11)
-                size_hint_y: None
-                height: max(self.texture_size[1], dp(24))
-                text_size: (self.width - dp(6), None)
-                halign: 'left'
 """
 
 
@@ -923,13 +801,6 @@ class PanBoostApp(App):
         self._progress = 0.0
         self._btn_text = "开始下载"
         self.dir_short = external_files_dir()
-        # v2.0.0 统一日志：app-*.log 按天轮转（保留 7 天）+ 全局
-        # 异常钩子（主线程/子线程未捕获异常全部进日志，链式保留
-        # crash-*.log 落盘）
-        applog.init(self.dir_short)
-        applog.install_hooks()
-        applog.info("app", "PanBoost v%s 启动（Android=%s）"
-                    % (SHELL_VERSION, IS_ANDROID))
         self.root = Builder.load_string(KV)
         # Android 返回键/手势（Kivy keycode 27）必须显式处理：
         # WebView 登录层打开时系统默认行为既不关层也不回退网页，
@@ -957,52 +828,11 @@ class PanBoostApp(App):
         return wrap
 
     def go(self, name):
-        """切屏（v2.0.0：底部导航 Tab 高亮同步 + 各屏惰性刷新）。"""
-        try:
-            self.root.ids.sm.current = name
-        except Exception:
-            pass
-        for key in ("home", "download", "accounts", "history", "logs"):
-            try:
-                tab = getattr(self.root.ids, "tab_" + key, None)
-                if tab is not None:
-                    tab.active = (key == name)
-            except Exception:
-                pass
+        self.root.current = name
         if name == "accounts":
             self.refresh_accounts()
         elif name == "history":
             self.refresh_history()
-        elif name == "logs":
-            self.refresh_logs()
-
-    def _cur(self):
-        """当前屏名（v2.0.0 root 为 BoxLayout，ScreenManager 在 ids.sm）。"""
-        try:
-            return self.root.ids.sm.current
-        except Exception:
-            return "home"
-
-    def refresh_logs(self):
-        """日志屏渲染：ring 最近 200 条，ERROR 红 / WARN 橙着色。"""
-        try:
-            lines = []
-            for ts, lv, tag, msg in applog.ring_raw()[-200:]:
-                one = "%s %s [%s] %s" % (ts, lv, tag, msg)
-                if lv == "ERROR":
-                    lines.append("[color=#dc2626]%s[/color]" % one)
-                elif lv == "WARN":
-                    lines.append("[color=#d97706]%s[/color]" % one)
-                else:
-                    lines.append(one)
-            ids = self._scr("logs").ids
-            ids.logs_lbl.text = "\n".join(lines) if lines else "（暂无日志）"
-            n_files = len(applog.log_files())
-            ids.logs_status.text = (
-                "最近 %d 条 · 日志文件 %d 份（app-日期.log，保留 7 天，"
-                "在应用外部目录可取回反馈）" % (len(lines), n_files))
-        except Exception:
-            _dump_crash("refresh_logs: ")
 
     def _on_key(self, window, key, *args):
         """三键导航 BACK 的 Kivy 兜底（v1.8.3：手势不经过此路径）：
@@ -1017,7 +847,7 @@ class PanBoostApp(App):
             if weblogin.is_open():
                 weblogin.request_back()
                 return True
-            if self.root is not None and self._cur() != "home":
+            if self.root is not None and self.root.current != "home":
                 self.go("home")
                 return True
         except Exception:
@@ -1025,7 +855,7 @@ class PanBoostApp(App):
         return False
 
     def _scr(self, name):
-        return self.root.ids.sm.get_screen(name)
+        return self.root.get_screen(name)
 
     def _load_settings(self):
         h = load_history()
@@ -1049,23 +879,17 @@ class PanBoostApp(App):
         for pan in PANS:
             rec = acc.get(pan["key"])
             if rec is not None and rec.get("verified", True):
-                txt = (f"{pan['name']}\n"
-                       "[b][color=#16a34a]已登录[/color][/b]\n"
-                       f"[sub]{pan['domains'][0]}[/sub]")
+                txt = f"{pan['name']}\n[b][color=#16a34a]已登录[/color][/b]"
             elif rec is not None:
                 # v1.8.5：Cookie 已保存但无法验证登录态（localStorage
                 # 型网盘）——如实显示，绝不冒充"已登录"
                 txt = (f"{pan['name']}\n"
-                       "[b][color=#b45309]Cookie已存·未验证[/color][/b]\n"
-                       f"[sub]{pan['domains'][0]}[/sub]")
+                       "[b][color=#b45309]Cookie已存·未验证[/color][/b]")
             else:
-                # v1.9.0：第三行行动召唤，用户不用猜点卡片干什么
-                txt = (f"{pan['name']}\n"
-                       "[color=#2563eb]点击网页登录[/color]\n"
-                       f"[sub]{pan['domains'][0]}[/sub]")
+                txt = f"{pan['name']}\n[sub]{pan['domains'][0]}[/sub]"
             btn = CardButton(
                 text=txt, markup=True, font_size=sp(13),
-                size_hint_y=None, height=dp(96),
+                size_hint_y=None, height=dp(84),
                 halign="center", valign="middle")
             btn.bind(on_release=self._guard(self.pan_login, pan["key"]))
             grid.add_widget(btn)
@@ -1087,30 +911,23 @@ class PanBoostApp(App):
         err_txt = None
         if weblogin.available():
             def on_done(cookie, auto):
-                applog.info("login", "%s 登录完成（auto=%s）"
-                            % (pan_key, auto))
                 _dump_nav_log(pan_key)
                 _on_ui(lambda: self._after_login(pan_key, cookie, auto))
 
             def on_cancel():
-                applog.info("login", "%s 登录已取消（未保存）" % pan_key)
                 _dump_nav_log(pan_key)
                 _on_ui(lambda: self._home_status(
                     f"已返回（{pan['name']} 登录未保存）——随时可再点卡片登录"))
 
             try:
-                weblogin.open_login(
-                    pan["login"], pan["auth_keys"], on_done,
-                    title=pan["name"], on_cancel=on_cancel,
-                    cookie_urls=tuple(f"https://{d}/"
-                                      for d in pan["domains"]))
-                applog.info("login", "打开 %s 网页登录（%s）"
-                            % (pan["name"], pan["login"]))
+                weblogin.open_login(pan["login"], pan["auth_keys"],
+                                    on_done, title=pan["name"],
+                                    on_cancel=on_cancel)
                 self._home_status(
-                    f"已打开 {pan['name']} 网页登录（桌面版）——"
-                    "顶部 ✕ 或返回键回到本页"
+                    f"已打开 {pan['name']} 登录页（桌面版）——"
+                    "手势/返回键或顶部 ✕ 可回到本页"
                     + ("，检测到登录将自动保存" if pan["auth_keys"]
-                       else "，登录后点底部【已完成登录】"))
+                       else "，完成后点 ✓ 完成登录"))
                 return
             except Exception as e:
                 err_txt = f"{type(e).__name__}: {e}"
@@ -1133,8 +950,6 @@ class PanBoostApp(App):
         pan = PAN_BY_KEY.get(pan_key)
         if record_login(pan_key, cookie, auto):
             self._build_pan_grid()
-            applog.info("login", "%s 已登录并永久保存（auto=%s）"
-                        % (pan_key, auto))
             when = "自动检测" if auto else "手动确认"
             if pan.get("auth_keys"):
                 self._home_status(
@@ -1144,8 +959,6 @@ class PanBoostApp(App):
                     f"{pan['name']} 网页 Cookie 已保存（该网盘登录态不在"
                     " Cookie 中，无法自动验证；下载时将自动尝试携带）")
         else:
-            applog.warn("login", "%s 凭证校验未通过（Cookie 未保存）"
-                        % pan_key)
             self._home_status(
                 f"未检测到 {pan['name']} 的登录凭证——请先在页面完成"
                 "登录（已登录的浏览器内页面对象才能种下特征 Cookie）")
@@ -1166,7 +979,6 @@ class PanBoostApp(App):
         ids.domain_input.text = ""
         ids.cookie_input.text = ""
         st.text = f"已保存 {domain}（下载时自动匹配携带）"
-        applog.info("account", "手动保存账号 %s" % domain)
         self.refresh_accounts()
 
     def refresh_accounts(self):
@@ -1201,7 +1013,6 @@ class PanBoostApp(App):
             box.add_widget(btn)
 
     def del_account(self, key):
-        applog.info("account", "删除账号 %s" % key)
         if key in PAN_BY_KEY:
             remove_login(key)
         else:
@@ -1275,8 +1086,6 @@ class PanBoostApp(App):
             self.log(f"自动匹配已登录网盘 Cookie（{auto_cookie[:40]}…）")
         else:
             self.log("未匹配到已存账号 Cookie，匿名下载")
-        applog.info("download", "开始下载 %s（线程=%s）"
-                    % (url[:96], choice))
         self._progress = 0.0
         self._status = "探测中…"
         self._cancel = False
@@ -1380,28 +1189,20 @@ class PanBoostApp(App):
                                               if self.dl else time.time()), 1e-6)
                 speed = (size or 0) / elapsed
                 self.log("下载完成")
-                applog.info("download", "完成 %s（%d 字节）"
-                            % (out_name, size))
             elif rc == 130:
                 self._status = "已停止（进度已保存，可续传）"
                 status = "中断"
-                applog.warn("download", "用户停止 %s（进度已保存）"
-                            % out_name)
             else:
                 err = self.dl.errors[0] if self.dl and self.dl.errors else "未知错误"
                 self._status = "失败（进度已保存）"
                 status = "失败"
                 self.log(f"失败: {err}")
-                applog.error("download", "下载失败 %s: %s"
-                             % (url[:96], err))
         except Exception as e:
             self._status = "失败"
             status = "失败"
             if not out_name:
                 out_name = _safe_name(share_name, url)  # 探测失败也记录，便于重跑
             self.log(f"{type(e).__name__}: {e}")
-            applog.error("download", "%s: %s（%s）"
-                         % (type(e).__name__, e, url[:96]), exc=e)
         finally:
             self.dl = None
             stop_keepalive()
@@ -1420,8 +1221,6 @@ class PanBoostApp(App):
         except pb.DownloadError as e:
             self._status = f"解析失败: {str(e)[:50]}"
             self.log(f"分享解析失败: {e}")
-            applog.error("share", "分享解析失败 %s: %s"
-                         % (url[:96], e), exc=e)
             add_history({"ts": int(time.time()), "url": url,
                          "name": _safe_name(None, url), "size": 0,
                          "status": "失败", "speed": 0})

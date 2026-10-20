@@ -6,19 +6,6 @@ auth_keys: 登录成功特征 Cookie 键，全部命中才判定"已登录"并�
 domains:   Cookie 生效域（写入引擎 cookie store，下载时后缀匹配）
 share:     分享链接域名特征（引擎 resolve_share 识别用）
 
-v1.9.0 登录 URL 实锤修正（LinkSwift v1.1.4 @match 清单 +
-AList 驱动文档双源调研，2026-10-20）：
-- 阿里云盘：www.alipan.com/ 首页是产品宣传页（含"下载客户端"
-  引导），网页版真实路径 www.alipan.com/drive/
-- 天翼云盘：cloud.189.cn/ 根路径会跳 APP 引导，网页版在
-  cloud.189.cn/web/
-- 移动云盘：旧门户 caiyun.feixin.10086.cn 会跳 APP 引导，
-  网页版主域 yun.139.com；Cookie 域补 139.com（旧域只有
-  10086.cn，新域 Cookie 匹配不到）
-- 夸克 pan.quark.cn / UC drive.uc.cn：LinkSwift @match 与
-  AList 官方入口双源确认域名无误（真机"下载页/打不开"表象
-  根因是桌面 UA 与整块配置一起被吞，见 weblogin v1.9.0）
-
 特征键调研来源（2026-10-20，v1.8.5）：
 - 夸克/UC：netdisk-fast-download（qaiu）CookieUtils.UC_QUARK_COOKIE_KEYS
   实战白名单 __pus/__kp/__kps/__ktd/__uid/__puus；__puus 为会话签名
@@ -46,27 +33,18 @@ PANS = [
     {"key": "quark", "name": "夸克网盘", "login": "https://pan.quark.cn/",
      "domains": ["quark.cn"], "auth_keys": ["__pus", "__puus"],
      "share": ["pan.quark.cn/s/"]},
-    # v1.9.0：首页 / 是产品宣传页（含下载客户端引导），网页版
-    # 真实路径 /drive/（LinkSwift @match www.alipan.com/drive*）
-    {"key": "alipan", "name": "阿里云盘",
-     "login": "https://www.alipan.com/drive/",
+    {"key": "alipan", "name": "阿里云盘", "login": "https://www.alipan.com/",
      "domains": ["alipan.com", "aliyundrive.com"], "auth_keys": [],
      "share": ["alipan.com/s/", "aliyundrive.com/s/"]},
     {"key": "weiyun", "name": "腾讯微云", "login": "https://www.weiyun.com/",
      "domains": ["weiyun.com"], "auth_keys": [],
      "share": ["weiyun.com/disk/", "share.weiyun.com/"]},
-    # v1.9.0：cloud.189.cn/ 根路径会跳 APP 引导，网页版在
-    # cloud.189.cn/web/（LinkSwift @match cloud.189.cn/web/*）
-    {"key": "tianyi", "name": "天翼云盘",
-     "login": "https://cloud.189.cn/web/",
+    {"key": "tianyi", "name": "天翼云盘", "login": "https://cloud.189.cn/",
      "domains": ["189.cn"], "auth_keys": ["COOKIE_LOGIN_USER"],
      "share": ["cloud.189.cn/t/", "189.cn/t/"]},
-    # v1.9.0：旧门户 caiyun.feixin.10086.cn 会跳 APP 引导，网页版
-    # 主域 yun.139.com（LinkSwift @match yun.139.com/*）；Cookie
-    # 域补 139.com（下载携带时后缀匹配需要）
     {"key": "yidong", "name": "移动云盘",
-     "login": "https://yun.139.com/",
-     "domains": ["139.com", "10086.cn"], "auth_keys": [],
+     "login": "https://caiyun.feixin.10086.cn/",
+     "domains": ["10086.cn"], "auth_keys": [],
      "share": ["caiyun.139.com/m/", "yun.139.com/"]},
     {"key": "xunlei", "name": "迅雷云盘", "login": "https://pan.xunlei.com/",
      "domains": ["xunlei.com"], "auth_keys": [],

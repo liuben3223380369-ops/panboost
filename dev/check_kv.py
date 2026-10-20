@@ -42,8 +42,8 @@ def main():
 
     root = m.Builder.load_string(m.KV)
 
-    names = {s.name for s in root.screens}
-    assert names == {"home", "download", "accounts", "history"}, \
+    names = {s.name for s in root.ids.sm.screens}
+    assert names == {"home", "download", "accounts", "history", "logs"}, \
         f"屏幕缺失: {names}"
 
     need = {
@@ -54,9 +54,10 @@ def main():
         "accounts": {"domain_input", "cookie_input", "accounts_status",
                      "accounts_box"},
         "history": {"history_box", "rec_switch"},
+        "logs": {"logs_lbl", "logs_status"},
     }
     for scr, ids in need.items():
-        got = set(root.get_screen(scr).ids)
+        got = set(root.ids.sm.get_screen(scr).ids)
         miss = ids - got
         assert not miss, f"{scr} 屏缺少组件: {miss}"
 
@@ -315,7 +316,7 @@ def main():
     assert "rgba: 0.957, 0.965, 0.984, 1" in kv, "缺浅色底绘制"
     assert "RoundedRectangle" in kv, "卡片缺圆角绘制"
 
-    spinner = root.get_screen("download").ids.threads_spinner
+    spinner = root.ids.sm.get_screen("download").ids.threads_spinner
     from kivy.uix.spinner import SpinnerOption
     assert issubclass(spinner.option_cls, SpinnerOption), \
         f"option_cls 非法: {spinner.option_cls}"
