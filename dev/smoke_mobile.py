@@ -102,12 +102,22 @@ class _Builder:
                           accounts_box=_Widget())
         history = screen("history", rec_switch=_Widget(active=True),
                          history_box=_Widget())
+        logs = screen("logs", logs_lbl=_Widget(text="（暂无日志）"),
+                      logs_status=_Widget())
         sm = types.SimpleNamespace()
         sm.current = "home"
         sm._screens = {"home": home, "download": download,
-                       "accounts": accounts, "history": history}
+                       "accounts": accounts, "history": history,
+                       "logs": logs}
         sm.get_screen = sm._screens.get
-        return sm
+        # v2.0.0：root 为 BoxLayout（ScreenManager + 底部导航栏）
+        root = types.SimpleNamespace()
+        root.ids = types.SimpleNamespace(
+            sm=sm,
+            tab_home=_Widget(active=True), tab_download=_Widget(),
+            tab_accounts=_Widget(), tab_history=_Widget(),
+            tab_logs=_Widget())
+        return root
 
 
 lang_mod = types.ModuleType("kivy.lang")
@@ -117,6 +127,8 @@ metrics_mod.dp = lambda x: x
 metrics_mod.sp = lambda x: x
 props_mod = types.ModuleType("kivy.properties")
 props_mod.ListProperty = lambda *a, **k: list(a[0]) if a else []
+props_mod.BooleanProperty = lambda *a, **k: bool(a[0]) if a else False
+props_mod.StringProperty = lambda *a, **k: str(a[0]) if a else ""
 uix_mod = types.ModuleType("kivy.uix")
 btn_mod = types.ModuleType("kivy.uix.button")
 btn_mod.Button = _Btn
@@ -228,10 +240,10 @@ def main():
     missing = [n for n in custom if n not in defined]
     check("壳-KV自定义类均有Python定义", not missing and bool(custom),
           f"自定义类={custom} 缺失={missing}")
-    check("壳-四屏类已定义且为Screen子类",
+    check("壳-五屏类已定义且为Screen子类（含日志屏）",
           all(issubclass(getattr(mobile_main, n, type(None)), _Screen)
               for n in ("MainScreen", "DownloadScreen", "AccountsScreen",
-                        "HistoryScreen")))
+                        "HistoryScreen", "LogsScreen")))
     vals = re.search(r"values: \[([^\]]+)\]", mobile_main.KV).group(1)
     check("壳-线程选项含512/1024", "'512'" in vals and "'1024'" in vals,
           vals)
@@ -274,8 +286,9 @@ def main():
           and "setUserAgentString(DESKTOP_UA)" in wsrc
           and "setUseWideViewPort" in wsrc,
           _wl.DESKTOP_UA[:56] + "…")
-    check("壳-登录层✕返回与✓完成双按钮",
-          "✕ 返回首页" in wsrc and "✓ 完成登录" in wsrc
+    check("壳-登录层✕关闭与完成登录按钮（v1.9.0 标准布局）",
+          '"✕"' in wsrc and "已完成登录，保存 Cookie" in wsrc
+          and " · 网页登录" in wsrc
           and hasattr(_wl, "close_login")
           and hasattr(_wl, "request_back")
           and "canGoBack" in wsrc)
@@ -289,7 +302,8 @@ def main():
     check("壳-close_login幂等无异常", True)
     app.go("accounts")
     check("壳-非首页按返回键回首页",
-          app._on_key(None, 27) is True and app.root.current == "home")
+          app._on_key(None, 27) is True
+          and app.root.ids.sm.current == "home")
     check("壳-首页按返回键走系统默认退出",
           app._on_key(None, 27) is False)
     check("壳-非返回键不拦截",
@@ -331,14 +345,14 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本1.8.5",
-          mobile_main.SHELL_VERSION == "1.8.5", mobile_main.SHELL_VERSION)
+    check("壳-壳版本2.0.0",
+          mobile_main.SHELL_VERSION == "2.0.0", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
           '"click_cbs"' in wsrc
-          and "click_back, click_done" in wsrc
-          and "btn_back.setOnClickListener(click_back)" in wsrc
+          and "click_close, click_done" in wsrc
+          and "tv_close.setOnClickListener(click_close)" in wsrc
           and "btn_done.setOnClickListener(click_done)" in wsrc,
           "pyjnius proxy 只存指针不持引用")
     check("壳-Dialog显式全屏（防WebView高度塌陷）",
@@ -392,6 +406,139 @@ def main():
           and "ESTSAUTH" in mobile_main.PAN_BY_KEY["onedrive"]["auth_keys"],
           "夸克/UC=__pus+__puus；天翼=COOKIE_LOGIN_USER；OneDrive=ESTSAUTH")
 
+    # ---- v1.9.0 修复"三色块无字 + 夸克/阿里下载页 + UC 打不开" ----
+    check("壳-文字三级保险（真机按钮无字根因）",
+          "def _set_text" in wsrc
+          and 'autoclass("java.lang.String")' in wsrc,
+          "setText 重载解析失败时走 Java String 对象通道")
+    check("壳-文字颜色双保险",
+          "def _set_text_color" in wsrc and "Color.rgb" in wsrc,
+          "int 直传失败时 Color.rgb 同类型回传")
+
+    class _V:
+        def __init__(self, fail=False):
+            self.txt = None
+            self.fail = fail
+
+        def setText(self, t):
+            if self.fail:
+                raise RuntimeError("no such method")
+            self.txt = t
+    v_ok = _V()
+    check("壳-_set_text一级直传生效",
+          _wl._set_text(v_ok, "测试") is True and v_ok.txt == "测试")
+    check("壳-_set_text全失败返回False",
+          _wl._set_text(_V(fail=True), "测试") is False,
+          "非Android下二级通道不可用→False（真机二级通道生效）")
+    check("壳-标准登录页布局（标题栏+提示条+底部大按钮）",
+          "C_BAR_BG" in wsrc and " · 网页登录" in wsrc
+          and "在下方页面登录账号" in wsrc
+          and "已完成登录，保存 Cookie" in wsrc
+          and "C_DONE_BG" in wsrc,
+          "消灭'三个色块不知道是什么'")
+    check("壳-桌面UA读回验证（下载页根因诊断）",
+          "getUserAgentString" in wsrc
+          and "setUserAgentString(DESKTOP_UA)" in wsrc,
+          "UA 曾与整块配置一起被吞，现独立设置+验证记 nav_log")
+    check("壳-登录URL实锤修正（LinkSwift @match）",
+          mobile_main.PAN_BY_KEY["alipan"]["login"]
+          == "https://www.alipan.com/drive/"
+          and mobile_main.PAN_BY_KEY["tianyi"]["login"]
+          == "https://cloud.189.cn/web/"
+          and mobile_main.PAN_BY_KEY["yidong"]["login"]
+          == "https://yun.139.com/"
+          and "139.com" in mobile_main.PAN_BY_KEY["yidong"]["domains"],
+          "阿里 /drive、天翼 /web、移动 yun.139.com")
+    # ---- v1.9.2 根治"点保存没反应"（反馈通道+多域采集+埋点） ----
+    check("壳-关键函数完整存在（v1.9.1误删current_cookies防回归）",
+          hasattr(_wl, "current_cookies")
+          and hasattr(_wl, "open_login")
+          and hasattr(_wl, "close_login") and hasattr(_wl, "is_open")
+          and hasattr(_wl, "nav_log"),
+          "v1.9.1 曾误删 def current_cookies 致点保存必失败")
+    msrc = Path(mobile_main.__file__).read_text(encoding="utf-8")
+    check("壳-保存按钮反馈与多域采集结构（v1.9.2）",
+          "def _nudge_button" in wsrc and "def _merge_cookies" in wsrc
+          and "def _gather_cookies" in wsrc and "def _jstr" in wsrc
+          and "C_ERR" in wsrc and "DONE_BTN_TEXT" in wsrc
+          and '_STATE["btn_done"]' in wsrc
+          and "cookie_urls=" in msrc,
+          "按钮红色提示+Toast双保险+多域Cookie+点击/校验埋点")
+    m1 = _wl._merge_cookies(None, "x=1; y=2")
+    m2 = _wl._merge_cookies("x=1; y=2", "y=9; z=3")
+    m3 = _wl._merge_cookies(None, None)
+    check("壳-_merge_cookies合并去重与空安全",
+          m1 == "x=1; y=2" and m2 == "x=1; y=9; z=3" and m3 is None,
+          f"{m1!r} / {m2!r} / {m3!r}")
+    check("壳-_jstr非Android回退原串",
+          _wl._jstr("abc") == "abc",
+          "Java String 通道不可用时静默回退")
+    _oc = _wl.current_cookies
+    try:
+        _wl.current_cookies = lambda u: {
+            "https://a.com/": "x=1",
+            "https://b.com/": "y=2; x=9"}.get(u)
+        c, e = _wl._gather_cookies(
+            ("https://a.com/", "https://b.com/", "https://c.com/"))
+        check("壳-_gather_cookies多域合并与空域容错",
+              c == "x=9; y=2" and e is None, f"cookie={c!r} err={e!r}")
+        _wl.current_cookies = lambda u: (_ for _ in ()).throw(
+            RuntimeError("boom"))
+        c2, e2 = _wl._gather_cookies(("https://a.com/",))
+        check("壳-_gather_cookies全失败返回异常文本",
+              c2 is None and "boom" in (e2 or ""), f"err={e2!r}")
+    finally:
+        _wl.current_cookies = _oc
+    _saved2 = dict(_wl._STATE)
+    try:
+        _wl._STATE["btn_done"] = None
+        _wl._nudge_button()
+        _wl._STATE["btn_done"] = object()
+        _wl._nudge_button()
+        check("壳-_nudge_button非Android环境安全无异常", True,
+              "按钮为 None 早退；_run_ui 不可用被吞不抛")
+    finally:
+        _wl._STATE.clear()
+        _wl._STATE.update(_saved2)
+
+    # ---- v1.9.1 根治"登录完成后直接闪退"（关闭时序三层防御） ----
+    check("壳-退休列表机制（防GC后Java回调闪退）",
+          "def _retire" in wsrc and '"retired": []' in wsrc
+          and "del rl[:-6]" in wsrc,
+          "回调对象延迟回收，封死 dismiss 后飞行回调窗口")
+    check("壳-关闭前解绑回调源（闪退根因）",
+          "setWebViewClient(None)" in wsrc
+          and "setOnKeyListener(None)" in wsrc
+          and "setOnCancelListener(None)" in wsrc,
+          "dismiss 不终止 Chromium 流水线，必须先切断回调源")
+
+    _saved = dict(_wl._STATE)
+    try:
+        _wl._STATE.update({
+            "root": "R1", "webview": "W1", "dialog": "D1",
+            "client_cb": "C1", "key_cb": "K1", "cancel_cb": "X1",
+            "click_cbs": ("A1", "B1"), "retired": []})
+        _wl._retire("root", "webview", "dialog", "client_cb", "key_cb",
+                    "cancel_cb", "click_cbs")
+        check("壳-_retire清空字段且一批对象全保留",
+              _wl._STATE["root"] is None
+              and _wl._STATE["click_cbs"] is None
+              and len(_wl._STATE["retired"]) == 1
+              and _wl._STATE["retired"][0].get("root") == "R1"
+              and _wl._STATE["retired"][0].get("click_cbs")
+              == ("A1", "B1"))
+        for _i in range(8):
+            _wl._STATE["root"] = f"R{_i}"
+            _wl._retire("root")
+        check("壳-退休列表上限裁剪（保留最近6批）",
+              len(_wl._STATE["retired"]) == 6
+              and _wl._STATE["retired"][-1] == {"root": "R7"},
+              "防重复登录内存累积")
+    finally:
+        _wl._STATE.clear()
+        _wl._STATE.update(_saved)
+
+
     # ---- v1.8.3 Dialog 承载 + onPageStarted 导航观测 ----
     check("壳-登录层全屏Dialog承载（手势返回系统级）",
           "android.app.Dialog" in wsrc
@@ -425,14 +572,14 @@ def main():
     app.pan_login("baidu")
     check("壳-无WebView回退手动登录路径",
           app._scr("accounts").ids.domain_input.text == "baidu.com"
-          and app.root.current == "accounts")
+          and app.root.ids.sm.current == "accounts")
 
     # WebView 可用路径：mock open_login 直接回调（模拟自动检测到 Cookie）
     mobile_main.weblogin.available = lambda: True
     orig_open = mobile_main.weblogin.open_login
     mobile_main.weblogin.open_login = (
-        lambda url, keys, on_done, title="", on_cancel=None:
-        on_done("BDUSS=fake123", True))
+        lambda url, keys, on_done, title="", on_cancel=None,
+        cookie_urls=(): on_done("BDUSS=fake123", True))
     app.pan_login("baidu")
     mobile_main.weblogin.open_login = orig_open
     acc = mobile_main.load_accounts()
@@ -489,8 +636,8 @@ def main():
     mobile_main.weblogin.available = lambda: True
     orig_open = mobile_main.weblogin.open_login
     mobile_main.weblogin.open_login = (
-        lambda url, keys, on_done, title="", on_cancel=None:
-        on_done("BDUSS=fake456", True))
+        lambda url, keys, on_done, title="", on_cancel=None,
+        cookie_urls=(): on_done("BDUSS=fake456", True))
     app.pan_login("baidu")
     mobile_main.weblogin.open_login = orig_open
     navs = sorted(Path(tmp).glob("nav-baidu-*.log"))
@@ -507,7 +654,8 @@ def main():
     # v1.7.2 起：失败详情（含步骤名）显示到账号页状态栏 + 落 crash log
     mobile_main.weblogin.available = lambda: True
 
-    def _boom(url, keys, on_done, title="", on_cancel=None):
+    def _boom(url, keys, on_done, title="", on_cancel=None,
+              cookie_urls=()):
         raise mobile_main.weblogin.WebLoginError(
             "登录层挂载失败: WebLoginError: 步骤[挂载到窗口]失败: "
             "RuntimeException: addContentView")
@@ -520,7 +668,7 @@ def main():
     acc_st = app._scr("accounts").ids.accounts_status.text
     check("壳-WebView失败回落账号屏手动路径",
           app._scr("accounts").ids.domain_input.text == "quark.cn"
-          and app.root.current == "accounts")
+          and app.root.ids.sm.current == "accounts")
     check("壳-WebView失败详情可见（账号页状态栏含步骤名）",
           "WebView 登录打开失败" in acc_st
           and "步骤[挂载到窗口]" in acc_st
@@ -633,11 +781,69 @@ def main():
     h3 = mobile_main.load_history()
     check("壳-失败任务已记录", h3["items"][0]["status"] == "失败",
           str(h3["items"][0]))
+    # ---- v2.0.0 统一日志 + 五屏 UI（底部导航 + 日志屏） ----
+    import applog as _al
+    check("壳-applog统一日志模块就绪",
+          all(hasattr(_al, f) for f in (
+              "init", "log", "info", "warn", "error", "tail",
+              "ring_raw", "install_hooks", "cleanup", "log_files")),
+          "app-日期.log 按天轮转保留 7 天 + 内存 ring + 异常钩子")
+    check("壳-底部导航五Tab（v2.0.0）",
+          all(("tab_%s" % k) in mobile_main.KV for k in (
+              "home", "download", "accounts", "history", "logs"))
+          and "NavTab" in mobile_main.KV
+          and "class NavTab" in py_src,
+          "首页/下载/账号/历史/日志")
+    check("壳-日志屏已挂载（name=logs）",
+          "LogsScreen" in mobile_main.KV and "name: 'logs'" in mobile_main.KV
+          and "id: logs_lbl" in mobile_main.KV
+          and "id: logs_status" in mobile_main.KV)
+    check("壳-全局异常钩子已装（applog 链式）",
+          sys.excepthook is not sys.__excepthook__)
+    app.go("logs")
+    check("壳-切日志屏Tab高亮同步",
+          app.root.ids.tab_logs.active is True
+          and app.root.ids.tab_home.active is False
+          and app.root.ids.sm.current == "logs")
+    check("壳-日志屏渲染ring内容",
+          len(app._scr("logs").ids.logs_lbl.text) > 0
+          and "份" in app._scr("logs").ids.logs_status.text,
+          "refresh_logs 已渲染（ERROR红/WARN橙着色）")
+    app.go("home")
+    app_logs = sorted(Path(tmp).glob("app-*.log"))
+    atxt = "\n".join(p.read_text(encoding="utf-8") for p in app_logs)
+    check("壳-错误日志落盘（app-日期.log）",
+          bool(app_logs) and "ERROR" in atxt and "download" in atxt,
+          f"{len(app_logs)} 份（tmp 下）")
+    check("壳-guard异常进统一日志",
+          any(lv == "ERROR" and tag == "crash"
+              for ts, lv, tag, msg in mobile_main.applog.ring_raw()),
+          "UI 回调异常不静默")
+    tmp2 = tempfile.mkdtemp(prefix="pbapplog_")
+    _al.init(tmp2)
+    _al.info("t", "info消息")
+    _al.warn("t", "warn消息")
+    try:
+        1 / 0
+    except ZeroDivisionError:
+        _al.error("t", "捕获除零", exc=sys.exc_info()[1])
+    afiles = list(Path(tmp2).glob("app-*.log"))
+    ftxt = afiles[0].read_text(encoding="utf-8") if afiles else ""
+    check("壳-applog文件写入与traceback",
+          bool(afiles) and "info消息" in ftxt and "WARN" in ftxt
+          and "ERROR" in ftxt and "ZeroDivisionError" in ftxt,
+          afiles[0].name if afiles else "无文件")
+    old = Path(tmp2) / "app-20200101.log"
+    old.write_text("x", encoding="utf-8")
+    os.utime(old, (0, 0))
+    _al.cleanup()
+    check("壳-applog轮转清理超期旧文件", not old.exists(), "保留 7 天")
+
     app.rerun("http://example.com/rerun.bin")
     check("壳-历史点击重跑预填URL",
           app._scr("download").ids.url_input.text
           == "http://example.com/rerun.bin"
-          and app.root.current == "download")
+          and app.root.ids.sm.current == "download")
 
     app.clear_history()
     check("壳-清空历史", mobile_main.load_history()["items"] == [])

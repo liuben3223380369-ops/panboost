@@ -64,7 +64,7 @@ jobs:
       - name: Rename APK
         run: |
           cd mobile/bin
-          for f in *.apk; do mv "$f" panboost-1.8.5-android.apk; done
+          for f in *.apk; do mv "$f" panboost-2.0.0-android.apk; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -77,12 +77,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（v1.8.5 登录误报根治版）。' '真机反馈 v1.8.4 部分网盘登录异常：点击卡片即被记为已登录（错误）、三色区域依旧无内容。''本次深入参考网盘解析开源项目（LinkSwift / netdisk-fast-download）的登录态判定实现，三项根治：' '①登录凭证校验——此前只要 Cookie 非空就记账，而登录页的游客 Cookie（如百度的 BAIDUID）也非空，导致一进登录页点完成就被误记已登录。''现在点✓完成时必须检测到该网盘的登录特征 Cookie（百度 BDUSS、夸克/UC 的 __pus+__puus、天翼 COOKIE_LOGIN_USER 等，来自开源网盘解析项目的实战特征键）才记账；''未检测到会弹出提示且登录页保持打开。阿里云盘/迅雷/123 等登录态存在网页 localStorage 而非 Cookie 的网盘，如实显示 Cookie已存·未验证，绝不冒充已登录。' '②三色区域根治——对话框改用非浮动全屏主题构造（Android 框架对浮动主题窗口强制包内容尺寸，网页区域高度被压成 0），窗口天生全屏；''网页控件先挂载后加载并按权重分配高度；网盘页跳转 App/应用市场被拦截后自动回到登录页（最多两次），仍失败则显示说明页，不再空白。' '③夸克/UC 特征键修正——__puus 一小时过期导致检测失败，改为 __pus+__puus 双特征（开源项目实战白名单）。' 'v1.8.4 的回调强引用（防点击闪退）、渲染进程崩溃防护、v1.8.3 的手势返回/市场页拦截全部保留。' '异常请取应用目录 crash-*.log 与 nav-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
-          TAG="android-v1.8.5"
+          printf '%s\\n' 'GitHub Actions 云端自动构建的调试签名 APK（PanBoost v2.0.0 结构与 UI 重构 + 统一错误日志版）。' '本版按用户需求整体重构结构与全部界面，并新增错误日志系统：' '①统一日志——新增 applog 模块：app-日期.log 按天轮转保留 7 天，记录登录/下载/账号全部关键操作与错误（ERROR 级自动附完整 traceback）；全局异常钩子覆盖主线程与子线程，任何未捕获异常不再静默；与既有 crash-*.log、nav-*.log 组成完整诊断体系。' '②UI 重构——五屏界面（新增日志屏）：底部导航栏五 Tab（首页/下载/账号/历史/日志）常驻高亮，取代此前各屏分散的返回按钮；日志屏实时查看运行日志（ERROR 红色 / WARN 橙色着色），真机无需连电脑即可自查问题；首页顶栏版本徽章、全屏统一卡片布局。' '③埋点——登录打开/完成/取消、下载开始/完成/失败/停止、账号保存/删除、UI 回调异常全部入日志。' 'v1.9.x 全部修复保留：登录完成闪退三层防御、点保存无反应根治（current_cookies 修复+按钮红色反馈+Cookie 多域采集）、登录页标准布局、登录地址实锤修正。' '异常请取应用目录 crash-*.log、nav-*.log 与 app-*.log 反馈。命令行完整功能请用 Termux，见 README。' > "$NOTES_FILE"
+          TAG="android-v2.0.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" mobile/bin/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v1.8.5" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" mobile/bin/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v2.0.0" --latest --notes-file "$NOTES_FILE"
           fi
 '''
 
