@@ -239,6 +239,7 @@ sys.modules["android"] = android_mod
 
 import main as mobile_main  # noqa: E402
 from test_server import TestServer  # noqa: E402
+import drive as drive_mod  # noqa: E402
 import panboost as pb  # noqa: E402
 
 CHECKS = []
@@ -375,8 +376,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.0.1",
-          mobile_main.SHELL_VERSION == "3.0.1", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.1.0",
+          mobile_main.SHELL_VERSION == "3.1.0", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
@@ -931,6 +932,124 @@ def main():
     check("壳-下载目录回退私有目录（无 jnius）",
           mobile_main.download_dir() == mobile_main.external_files_dir(),
           "公共目录写测试失败时回退")
+
+    # ---- v3.1.0 原生网盘浏览（夸克 Web API + 原生 FileRow）----
+    d4 = os.urandom(256 * 1024)
+    srv4 = TestServer()
+    srv4.add_path("/dl/movie.bin", d4)
+    srv4.add_json("/1/clouddrive/file/sort",
+                  {"code": 0, "status": 200, "data": {"list": [
+                      {"fid": "fd1", "file_name": "影视", "dir": True,
+                       "size": 0, "updated_at": "1"},
+                      {"fid": "ff1", "file_name": "readme.txt",
+                       "dir": False, "size": 1024,
+                       "updated_at": "2"}], "total": 2}},
+                  when_query="pdir_fid=0")
+    srv4.add_json("/1/clouddrive/file/sort",
+                  {"code": 0, "status": 200, "data": {"list": [
+                      {"fid": "ff2", "file_name": "movie.bin",
+                       "dir": False, "size": len(d4),
+                       "updated_at": "3"}], "total": 1}},
+                  when_query="pdir_fid=fd1")
+    srv4.add_json("/1/clouddrive/file/download",
+                  {"code": 0, "status": 200, "data": [
+                      {"fid": "ff2", "file_name": "movie.bin",
+                       "download_url": srv4.url + "/dl/movie.bin",
+                       "size": len(d4)}]}, method="POST")
+    os.environ["PANBOOST_DRIVE_HOSTS"] = _json.dumps({"quark": srv4.url})
+    check("壳-drive层不支持网盘返回None",
+          drive_mod.list_files("baidu", "x=1") is None,
+          "baidu 回退 WebView 浏览")
+    check("壳-drive层Set-Cookie合并保活",
+          drive_mod._set_kv("__pus=a; __puus=old; x=1", "__puus", "new")
+          == "__pus=a; x=1; __puus=new",
+          "__puus 新鲜化合并")
+    ok_q = mobile_main.record_login("quark", "x=1; __pus=a; __puus=b",
+                                    True)
+    check("壳-夸克登录记账（原生浏览前置）", ok_q,
+          str(mobile_main.load_accounts().get("quark")))
+    browse_calls = []
+    _ob = mobile_main.weblogin.open_browse
+    _obav = mobile_main.weblogin.available
+    mobile_main.weblogin.open_browse = (
+        lambda *a, **k: browse_calls.append(a))
+    mobile_main.weblogin.available = lambda: True
+    try:
+        app.pan_login("quark")
+    finally:
+        mobile_main.weblogin.open_browse = _ob
+        mobile_main.weblogin.available = _obav
+    for _ in range(100):
+        if app._scr("files").ids.files_box.children:
+            break
+        time.sleep(0.05)
+    check("壳-夸克已登录走原生列表（不再WebView）",
+          app.root.ids.sm.current == "files"
+          and "我的网盘" in app._scr("files").ids.files_title.text
+          and not browse_calls, str(browse_calls))
+    rows310 = app._scr("files").ids.files_box.children
+    check("壳-网盘原生列表渲染（文件夹+文件默认不选）",
+          len(rows310) == 2
+          and app._file_sel == [False, False]
+          and "下载所选（0）" in app._scr("files").ids.files_dl_btn.text,
+          "%d 行" % len(rows310))
+    hlogs = [h for h in srv4.header_log
+             if h["path"] == "/1/clouddrive/file/sort"]
+    check("壳-夸克API请求头规格（Referer+客户端UA）",
+          hlogs and hlogs[0]["Referer"] == "https://pan.quark.cn/"
+          and "quark-cloud-drive" in (hlogs[0]["UA"] or ""),
+          str(hlogs[:1]))
+    tapd = types.SimpleNamespace(x=100.0, y=100.0, pos=(100.0, 100.0),
+                                 ud={}, profile=[],
+                                 is_mouse_scrolling=False)
+    rows310[0].on_touch_down(tapd)
+    rows310[0].on_touch_up(tapd)
+    for _ in range(100):
+        if "影视" in app._scr("files").ids.files_title.text:
+            break
+        time.sleep(0.05)
+    check("壳-轻点文件夹进子目录（原生导航）",
+          "我的网盘 › 影视" in app._scr("files").ids.files_title.text
+          and len(app._scr("files").ids.files_box.children) == 1,
+          app._scr("files").ids.files_title.text)
+    row_mv = app._scr("files").ids.files_box.children[0]
+    sw = types.SimpleNamespace(x=100.0, y=100.0, pos=(100.0, 100.0),
+                               ud={}, profile=[],
+                               is_mouse_scrolling=False)
+    row_mv.on_touch_down(sw)
+    sw.x, sw.y, sw.pos = 180.0, 60.0, (180.0, 60.0)
+    row_mv.on_touch_up(sw)
+    check("壳-网盘列表滑动不误触勾选",
+          app._file_sel == [False], str(app._file_sel))
+    tapm = types.SimpleNamespace(x=100.0, y=100.0, pos=(100.0, 100.0),
+                                 ud={}, profile=[],
+                                 is_mouse_scrolling=False)
+    row_mv.on_touch_down(tapm)
+    row_mv.on_touch_up(tapm)
+    check("壳-轻点文件勾选（tap 判定）",
+          app._file_sel == [True]
+          and "下载所选（1）" in app._scr("files").ids.files_dl_btn.text,
+          str(app._file_sel))
+    app.start_selected_downloads()
+    app.worker.join(timeout=120)
+    fm = list(Path(tmp).glob("movie.bin"))
+    check("壳-网盘勾选批量下载完整",
+          fm and fm[0].read_bytes() == d4, "movie.bin 完整")
+    app.files_back()
+    for _ in range(100):
+        if app._scr("files").ids.files_title.text == "我的网盘":
+            break
+        time.sleep(0.05)
+    check("壳-返回上级回根目录",
+          app._scr("files").ids.files_title.text == "我的网盘"
+          and len(app._scr("files").ids.files_box.children) == 2,
+          app._scr("files").ids.files_title.text)
+    app.files_back()
+    check("壳-根目录返回回账号屏",
+          app.root.ids.sm.current == "accounts",
+          app.root.ids.sm.current)
+    del os.environ["PANBOOST_DRIVE_HOSTS"]
+    mobile_main.remove_login("quark")
 
     app.del_account("127.0.0.1")
     check("壳-删除账号生效", "127.0.0.1" not in pb.load_cookie_store())

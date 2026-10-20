@@ -141,6 +141,7 @@ if IS_ANDROID:
 
 sys.path.insert(0, str(Path(__file__).parent))
 import panboost as pb  # noqa: E402
+import drive  # noqa: E402
 import weblogin  # noqa: E402
 import applog  # noqa: E402
 from pans import PANS, PAN_BY_KEY  # noqa: E402
@@ -150,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.0.1"
+SHELL_VERSION = "3.1.0"
 
 
 def register_font():
@@ -273,7 +274,7 @@ class FileRow(BoxLayout):
 
 
 class FilesScreen(Screen):
-    """分享文件列表屏（v3.0.0 YunX 式体验：勾选后下载所选）。"""
+    """文件列表屏（v3.0.0 分享勾选 + v3.1.0 网盘原生浏览双形态）。"""
 
 
 class LogsScreen(Screen):
@@ -1033,7 +1034,7 @@ BoxLayout:
                 font_size: sp(14)
                 size_hint_x: None
                 width: dp(76)
-                on_release: app.go('download')
+                on_release: app.files_back()
             Label:
                 id: files_title
                 text: '分享文件'
@@ -1128,6 +1129,8 @@ class PanBoostApp(App):
         self._log_serial = -1
         # v3.0.0 分享文件列表（YunX 式勾选下载）
         self._share_ctx = None
+        self._drive_ctx = None
+        self._drive_loading = False
         self._file_sel = []
         self._status = "待命"
         self._progress = 0.0
@@ -1327,15 +1330,31 @@ class PanBoostApp(App):
         # 东西下载"，不是再看一遍登录页）
         acc = load_accounts()
         rec = acc.get(pan_key)
-        if rec is not None and rec.get("verified", True) \
-                and pan.get("home") and weblogin.available():
-            try:
-                self._open_browse(pan_key)
-                return
-            except Exception as e:
-                _dump_crash("open_browse[%s]: " % pan_key)
-                self._home_status(
-                    f"打开网盘失败（{type(e).__name__}），改开登录页")
+        if rec is not None and rec.get("verified", True):
+            # v3.1.0：夸克已登录走原生"我的网盘"（Web API + 原生
+            # FileRow 列表）——WebView 网页版是 PC 页面，真机触摸
+            # 拖拽被网页解释成选择/点按且无原生滚动（"手指放在
+            # 文件区就自动选了"根因），原生列表的滑动/轻点即
+            # YunX 式体验；其他网盘暂回退 WebView 浏览
+            if (pan_key in drive.SUPPORTED
+                    and pb.match_cookie_header(pan["home"])):
+                try:
+                    self._browse_drive(pan_key)
+                    return
+                except Exception as e:
+                    _dump_crash("browse_drive[%s]: " % pan_key)
+                    self._home_status(
+                        f"原生列表打开失败（{type(e).__name__}），"
+                        "改开网页版")
+            if pan.get("home") and weblogin.available():
+                try:
+                    self._open_browse(pan_key)
+                    return
+                except Exception as e:
+                    _dump_crash("open_browse[%s]: " % pan_key)
+                    self._home_status(
+                        f"打开网盘失败（{type(e).__name__}），"
+                        "改开登录页")
         err_txt = None
         if weblogin.available():
             def on_done(cookie, auto):
@@ -1712,6 +1731,7 @@ class PanBoostApp(App):
     def _show_share_files(self, files, url, cookie, choice, insecure):
         """文件列表屏渲染（v3.0.0，主线程）。"""
         try:
+            self._drive_ctx = None
             self._share_ctx = {"files": files, "url": url,
                                "cookie": cookie, "choice": choice,
                                "insecure": insecure}
@@ -1727,6 +1747,9 @@ class PanBoostApp(App):
             self._home_status(f"文件列表渲染失败: {type(e).__name__}")
 
     def _render_files(self):
+        if self._drive_ctx is not None:
+            self._render_drive()
+            return
         ids = self._scr("files").ids
         box = ids.files_box
         box.clear_widgets()
@@ -1741,18 +1764,25 @@ class PanBoostApp(App):
         self._update_files_btn()
 
     def _file_row(self, i, f):
+        """文件行（v3.1.0 双形态）：文件夹轻点进入；文件轻点勾选。"""
         name = f.get("name") or "文件"
         size = int(f.get("size") or 0)
-        sel = self._file_sel[i]
+        if f.get("dir"):
+            return FileRow(
+                idx=i, on_tap=self._guard(self._tap_row, i),
+                mark="[color=#f59e0b]📁[/color]",
+                row_text=("%s\n[sub]文件夹 · 轻点进入[/sub]" % name),
+                sel_bg=(0.886, 0.906, 0.933, 1))
+        sel = self._file_sel[i] if i < len(self._file_sel) else False
         return FileRow(
-            idx=i, on_tap=self._guard(self._toggle_file, i),
+            idx=i, on_tap=self._guard(self._tap_row, i),
             mark=("[b][color=#16a34a]☑[/color][/b]" if sel
                   else "[color=#94a3b8]☐[/color]"),
             row_text=("%s\n[sub]%s[/sub]"
                       % (name,
                          pb.fmt_size(size) if size else "未知大小")),
             sel_bg=(0.831, 0.898, 0.949, 1) if sel
-            else (0.886, 0.906, 0.933, 1))
+                  else (0.886, 0.906, 0.933, 1))
 
     def _toggle_file(self, i):
         """点行切换勾选（v3.0.0）。"""
@@ -1763,9 +1793,9 @@ class PanBoostApp(App):
             pass
 
     def toggle_all_files(self):
-        """全选/全不选切换（v3.0.0）。"""
+        """全选/全不选切换（v3.0.0；v3.1.0 双形态）。"""
         try:
-            if self._share_ctx is None:
+            if self._share_ctx is None and self._drive_ctx is None:
                 return
             all_on = all(self._file_sel) if self._file_sel else False
             self._file_sel = [not all_on] * len(self._file_sel)
@@ -1778,19 +1808,44 @@ class PanBoostApp(App):
         ids = self._scr("files").ids
         ids.files_dl_btn.text = "下载所选（%d）" % n
         if not self._file_sel:
-            ids.files_info.text = "（空分享）"
+            ids.files_info.text = (
+                "（空目录）" if self._drive_ctx is not None
+                else "（空分享）")
 
     def start_selected_downloads(self):
-        """下载所选：批量加速下载勾选的文件（v3.0.0）。"""
+        """下载所选：批量加速下载勾选的文件（v3.1.0 双形态）。"""
         try:
-            if self._share_ctx is None:
+            if self._share_ctx is None and self._drive_ctx is None:
                 return
             if self.worker is not None and self.worker.is_alive():
                 self._scr("files").ids.files_info.text = (
                     "下载进行中，请等完成后再来")
                 return
+            if self._drive_ctx is not None:
+                ctx = self._drive_ctx
+                sel = [f for f, s in zip(ctx.get("entries") or [],
+                                         self._file_sel)
+                       if s and not f.get("dir")]
+                if not sel:
+                    self._scr("files").ids.files_info.text = (
+                        "未勾选任何文件（轻点文件行勾选）")
+                    return
+                self.go("download")
+                self.log(f"开始下载所选 {len(sel)} 个文件"
+                         "（可在下载页停止）")
+                applog.info("download", "网盘批量下载 %d 个" % len(sel))
+                self._progress = 0.0
+                self._cancel = False
+                if start_keepalive():
+                    self.log("已开启前台保活（锁屏/后台下载不断流）")
+                self.worker = threading.Thread(
+                    target=self._run_drive_batch,
+                    args=(sel, ctx["pan_key"]), daemon=True)
+                self.worker.start()
+                return
             sel = [f for f, s in zip(self._share_ctx["files"],
-                                     self._file_sel) if s]
+                                     self._file_sel)
+                   if s and not f.get("dir")]
             if not sel:
                 self._scr("files").ids.files_info.text = "未勾选任何文件"
                 return
@@ -1835,6 +1890,181 @@ class PanBoostApp(App):
             done = i
         self._status = f"批量完成 {done}/{total}"
         applog.info("download", "批量下载结束 %d/%d" % (done, total))
+
+    def _browse_drive(self, pan_key):
+        """已登录网盘：原生"我的网盘"文件列表（v3.1.0 夸克）。
+
+        WebView 网页版在真机的触摸体验不可救（PC 页面把拖拽解释
+        成选择/点按，无原生滚动——"手指放在文件区就自动选了"
+        根因）——改调网页版前端同款公开 API 拉文件列表，Kivy
+        原生 FileRow 渲染，滑动/轻点即 YunX 式体验。
+        """
+        self._share_ctx = None
+        self._drive_ctx = {
+            "pan_key": pan_key, "stack": [], "entries": [],
+            "choice": self._scr("download").ids.threads_spinner.text,
+            "insecure": bool(
+                self._scr("download").ids.insecure_switch.active)}
+        self._file_sel = []
+        self._drive_loading = False
+        ids = self._scr("files").ids
+        ids.files_title.text = "我的网盘"
+        ids.files_info.text = (
+            "正在加载（%s 原生列表）…" % PAN_BY_KEY[pan_key]["name"])
+        ids.files_box.clear_widgets()
+        ids.files_dl_btn.text = "下载所选（0）"
+        self.go("files")
+        self._fetch_drive(pan_key, "0", "我的网盘", push=True)
+        applog.info("drive", "原生网盘浏览打开 %s" % pan_key)
+
+    def _fetch_drive(self, pan_key, fid, name, push):
+        """拉取网盘目录（worker 线程，v3.1.0）。
+
+        push=True 进子目录（目录栈 append）；False 为返回上级
+        重拉。加载互斥（_drive_loading）防连点。
+        """
+        if self._drive_loading:
+            return
+        self._drive_loading = True
+        self._scr("files").ids.files_info.text = "加载中…"
+
+        def _ck():
+            return pb.match_cookie_header(
+                PAN_BY_KEY[pan_key]["home"]) or ""
+
+        def _save_ck(ck):
+            try:
+                store = pb.load_cookie_store()
+                for domain in PAN_BY_KEY[pan_key]["domains"]:
+                    store[domain] = ck
+                pb.save_cookie_store(store)
+            except Exception:
+                pass
+
+        def work():
+            entries = None
+            err = None
+            try:
+                entries = drive.list_files(pan_key, _ck(), fid,
+                                           on_cookie=_save_ck)
+            except Exception as e:
+                err = e
+                applog.error("drive", "拉取文件列表失败", exc=e)
+
+            def ui():
+                self._drive_loading = False
+                if entries is None:
+                    self._scr("files").ids.files_info.text = (
+                        "加载失败（%s）——点返回重试，或改用网页版"
+                        % type(err).__name__)
+                    return
+                if push:
+                    self._drive_ctx["stack"].append((fid, name))
+                self._drive_ctx["entries"] = entries
+                self._file_sel = [False] * len(entries)
+                self._render_drive()
+            _on_ui(ui)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _render_drive(self):
+        """网盘原生列表渲染（主线程，v3.1.0）。"""
+        ids = self._scr("files").ids
+        box = ids.files_box
+        box.clear_widgets()
+        ctx = self._drive_ctx or {}
+        entries = ctx.get("entries") or []
+        stack = ctx.get("stack") or []
+        ids.files_title.text = (
+            " › ".join(n for _f, n in stack) if stack else "我的网盘")
+        nf = sum(1 for e in entries if not e.get("dir"))
+        nd = len(entries) - nf
+        total = sum(int(e.get("size") or 0)
+                    for e in entries if not e.get("dir"))
+        ids.files_info.text = (
+            "%d 个文件 · %d 个文件夹 · 合计 %s · 轻点选择"
+            % (nf, nd, pb.fmt_size(total) if total else "0"))
+        for i, f in enumerate(entries):
+            box.add_widget(self._file_row(i, f))
+        self._update_files_btn()
+
+    def _tap_row(self, i):
+        """轻点行（v3.1.0）：文件夹进子目录；文件切换勾选。"""
+        try:
+            if self._drive_ctx is not None:
+                entries = self._drive_ctx.get("entries") or []
+                if i < len(entries) and entries[i].get("dir"):
+                    self._fetch_drive(
+                        self._drive_ctx["pan_key"],
+                        entries[i]["fid"], entries[i]["name"],
+                        push=True)
+                    return
+            self._toggle_file(i)
+        except Exception:
+            pass
+
+    def files_back(self):
+        """文件屏返回（v3.1.0 双形态）。
+
+        分享模式→下载屏；网盘模式→上级目录（重拉），根目录→
+        账号屏。"""
+        try:
+            if self._drive_ctx is not None:
+                stack = self._drive_ctx["stack"]
+                if len(stack) > 1:
+                    fid, name = stack[-2]
+                    stack.pop()
+                    self._fetch_drive(self._drive_ctx["pan_key"],
+                                      fid, name, push=False)
+                else:
+                    self._drive_ctx = None
+                    self.go("accounts")
+                return
+            self.go("download")
+        except Exception:
+            self.go("download")
+
+    def _run_drive_batch(self, files, pan_key):
+        """网盘勾选批量下载（worker 线程，v3.1.0）。
+
+        逐文件取直链（带 Cookie + __puus 保活）→ 引擎加速下载。
+        """
+        total = len(files)
+        hdrs = drive.download_headers(pan_key)
+        choice = (self._drive_ctx or {}).get("choice", "auto")
+        insecure = bool((self._drive_ctx or {}).get("insecure"))
+
+        def _ck():
+            return pb.match_cookie_header(
+                PAN_BY_KEY[pan_key]["home"]) or ""
+
+        done = 0
+        for i, f in enumerate(files, 1):
+            if getattr(self, "_cancel", False):
+                self.log(f"已停止（已完成 {done}/{total}）")
+                break
+            self.log(f"[{i}/{total}] {f.get('name') or '文件'}")
+            self._status = f"[{i}/{total}] 获取直链…"
+            url = ""
+            dl_name = ""
+            try:
+                r = drive.get_download_url(pan_key, _ck(), f["fid"])
+                if r:
+                    url, dl_name = r[0], (r[1] or f.get("name") or "")
+            except Exception as e:
+                self.log(f"获取直链失败: {e}")
+                applog.error("drive", "直链失败 %s: %s"
+                             % (f.get("fid"), e), exc=e)
+            if url:
+                self._status = f"[{i}/{total}] 下载中"
+                self._run_download(url, _ck(), choice, insecure,
+                                   share_name=f.get("name")
+                                   or dl_name or None,
+                                   share_headers=dict(hdrs)
+                                   if hdrs else None)
+            done = i
+        self._status = f"批量完成 {done}/{total}"
+        applog.info("download", "网盘批量下载结束 %d/%d"
+                    % (done, total))
 
     def _on_resume(self, *args):
         """剪贴板识别（v3.0.0）：复制分享链接回到 App 自动填入。"""

@@ -114,7 +114,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.0.1", "壳版本未升级到 3.0.1"
+    assert m.SHELL_VERSION == "3.1.0", "壳版本未升级到 3.1.0"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -396,8 +396,25 @@ def main():
     assert "<= dp(8)" in msrc, "缺 touchSlop 位移阈值判定"
     assert "on_release=self._guard(self._toggle_file" not in msrc, \
         "仍用 Button on_release（滚动误触根因）"
-    assert "on_tap=self._guard(self._toggle_file" in msrc, \
+    assert "on_tap=self._guard(self._tap_row" in msrc, \
         "行未接 tap 回调"
+
+    # v3.1.0 原生网盘浏览（夸克 Web API + 原生 FileRow 列表，
+    # 根治 WebView PC 网页"一碰就选中、无滑动"）
+    assert "import drive" in msrc, "缺网盘浏览 API 层"
+    for fn in ("_browse_drive", "_fetch_drive", "_render_drive",
+               "_tap_row", "files_back", "_run_drive_batch"):
+        assert hasattr(m.PanBoostApp, fn), f"缺 {fn}"
+    assert "drive.SUPPORTED" in msrc, "未按网盘分流原生浏览"
+    assert "drive.list_files" in msrc, "未调网盘列表 API"
+    assert "drive.get_download_url" in msrc, "未调网盘直链 API"
+    assert "on_release: app.files_back()" in m.KV, \
+        "文件屏返回未绑定 files_back"
+    assert "📁" in msrc, "缺文件夹行视觉"
+    dsrc = Path(ROOT).joinpath("mobile", "drive.py").read_text(
+        encoding="utf-8")
+    assert "drive-pc.quark.cn" in dsrc, "drive 层缺夸克 API 端点"
+    assert "Set-Cookie" in dsrc, "缺 __puus Cookie 保活合并"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG
