@@ -345,8 +345,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本2.0.1",
-          mobile_main.SHELL_VERSION == "2.0.1", mobile_main.SHELL_VERSION)
+    check("壳-壳版本2.1.0",
+          mobile_main.SHELL_VERSION == "2.1.0", mobile_main.SHELL_VERSION)
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-按钮回调持Python强引用（防GC闪退）",
@@ -591,6 +591,60 @@ def main():
     baidu_txt = app._scr("home").ids.pan_grid.children[0].text
     check("壳-已登录徽标刷新", "已登录" in baidu_txt,
           baidu_txt.replace("\n", " "))
+    check("壳-已登录卡片显示进入入口",
+          "进入我的网盘" in baidu_txt, baidu_txt.replace("\n", " "))
+
+    # ---- v2.1.0 已登录直入浏览模式 + 会话总闸 ----
+    wsrc210 = Path(_wl.__file__).read_text(encoding="utf-8")
+    check("壳-浏览模式与会话总闸（v2.1.0）",
+          "def open_browse" in wsrc210
+          and '"session": 0' in wsrc210
+          and wsrc210.count("_only_now") >= 6
+          and "time.sleep(3.0)" in wsrc210
+          and "browse=True" in wsrc210,
+          "已登录秒关层闪退根治：浏览模式+迟到回调作废+poller首轮延迟")
+    check("壳-18家网盘全部有home页",
+          all(p.get("home") for p in pans)
+          and pans[0]["home"] == "https://pan.baidu.com/disk/main",
+          "已登录卡片直入网页版文件页")
+    orig_avail = mobile_main.weblogin.available
+    orig_browse = mobile_main.weblogin.open_browse
+    orig_open210 = mobile_main.weblogin.open_login
+    browsed = []
+
+    browse_cbs = []
+
+    def _mock_browse(url, title="", on_close=None):
+        browsed.append((url, title))
+        browse_cbs.append(on_close)
+        return True
+
+    def _no_login(*a, **k):
+        raise AssertionError("已登录不应再走登录层")
+
+    mobile_main.weblogin.available = lambda: True
+    mobile_main.weblogin.open_browse = _mock_browse
+    mobile_main.weblogin.open_login = _no_login
+    try:
+        app.pan_login("baidu")
+        ok210 = True
+    except Exception:
+        ok210 = False
+    finally:
+        mobile_main.weblogin.available = orig_avail
+        mobile_main.weblogin.open_browse = orig_browse
+        mobile_main.weblogin.open_login = orig_open210
+    check("壳-已登录点卡片走浏览模式", ok210 and len(browsed) == 1
+          and browsed[0][0] == "https://pan.baidu.com/disk/main"
+          and browsed[0][1] == "百度网盘", str(browsed))
+    check("壳-浏览打开提示（打开层时状态栏引导）",
+          "已打开" in app._scr("home").ids.home_status.text)
+    if browse_cbs and browse_cbs[0] is not None:
+        browse_cbs[0]()  # 模拟用户关闭浏览层（✕/底部按钮）
+    check("壳-浏览关闭自动切下载屏引导",
+          app.root.ids.sm.current == "download"
+          and "粘贴" in app._scr("home").ids.home_status.text)
+    app.go("home")
 
     # 空 Cookie 不覆盖已有登录
     r = mobile_main.record_login("baidu", "", True)

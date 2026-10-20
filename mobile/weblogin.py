@@ -104,6 +104,9 @@ C_DONE_BG = 0xFF2563EB   # 完成按钮：主题蓝
 C_WHITE = 0xFFFFFFFF     # 白字（标题栏/按钮）
 C_ERR = 0xFFDC2626       # 校验失败提示：红（v1.9.2）
 DONE_BTN_TEXT = "✓  已完成登录，保存 Cookie"
+# v2.1.0 浏览模式（已登录直入我的网盘）
+BROWSE_BTN_TEXT = "✓  已复制链接，去下载"
+BROWSE_TIP_TEXT = "在你的网盘中浏览文件，复制文件/分享链接后点底部按钮"
 
 
 class WebLoginError(Exception):
@@ -155,6 +158,7 @@ _STATE = {"root": None, "webview": None, "dialog": None, "poller": None,
           "click_cbs": None, "btn_done": None,
           "retired": [],
           "nav_log": [],
+          "session": 0,
           "closed": threading.Event()}
 
 
@@ -485,13 +489,27 @@ class _BackKeyListener(PythonJavaClass):
         return False
 
 
-def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
+def _ui_open(url, title, on_manual_done, on_cancel, on_key_back,
+             browse=False):
     """在 UI 线程挂载覆盖层：[完成登录按钮 + WebView] 全屏。
 
     分步执行并标记失败步骤（真机诊断）：关键步骤失败抛
     WebLoginError（消息含步骤名）；非关键步骤（配色/Cookie/缩放）
     失败跳过，不阻塞登录层弹出。
     """
+    # v2.1.0 会话总闸：本层存活期间 session 不变；关闭（或新开
+    # 层）即递增作废——旧层的一切迟到回调（渲染崩溃/导航/按键/
+    # 取消/点击）按会话校验后直接忽略，不再误操作新层或已清理
+    # 状态（真机"已登录点卡片闪退"的竞态总闸）
+    sid = _STATE["session"]
+
+    def _only_now(fn):
+        def wrap(*a, **k):
+            if _STATE["session"] != sid:
+                return
+            return fn(*a, **k)
+        return wrap
+
     def _step(name, fn, critical=True):
         try:
             return fn()
@@ -544,7 +562,7 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     # proxy 只存指针不持引用，内联创建引用计数归零立即被 GC，
     # Java 侧点击已死 proxy 直接 native crash（真机"点击就闪退"根因）
     click_close = _step("构造关闭点击回调",
-                        lambda: _ClickListener(on_cancel))
+                        lambda: _ClickListener(_only_now(on_cancel)))
     _step("关闭按钮绑定点击",
           lambda: tv_close.setOnClickListener(click_close))
     _step("关闭按钮入栏", lambda: titlebar.addView(tv_close,
@@ -573,7 +591,8 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     tv_tip = _step("构造提示条", lambda: TextView(activity))
     _step("提示条文字",
           lambda: _set_text(
-              tv_tip, "在下方页面登录账号，完成后点底部按钮保存 Cookie"),
+              tv_tip, BROWSE_TIP_TEXT if browse else
+              "在下方页面登录账号，完成后点底部按钮保存 Cookie"),
           critical=False)
     _step("提示条底色",
           lambda: tv_tip.setBackgroundColor(_jcolor(C_TIP_BG)),
@@ -696,8 +715,9 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
             pass
 
     client_cb = _step("构造导航回调",
-                      lambda: _UrlLoadingCallback(_handle_url, _on_nav,
-                                                  _on_render_gone))
+                      lambda: _UrlLoadingCallback(
+                          _only_now(_handle_url), _only_now(_on_nav),
+                          _only_now(_on_render_gone)))
     PanWebViewClient = _step(
         "加载PanWebViewClient类",
         lambda: autoclass("org.panboost.panwebview.PanWebViewClient"))
@@ -708,7 +728,8 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     # v1.8.2 返回键：WebView 抢焦点后自己消费 KEYCODE_BACK，必须在
     # View 层挂 OnKeyListener 拦截（硬件返回键兜底；手势返回走
     # Dialog 的 OnCancelListener，见下）
-    key_cb = _step("构造返回键监听", lambda: _BackKeyListener(on_key_back))
+    key_cb = _step("构造返回键监听",
+                   lambda: _BackKeyListener(_only_now(on_key_back)))
     _step("WebView可获焦点",
           lambda: (wv.setFocusable(True),
                    wv.setFocusableInTouchMode(True)), critical=False)
@@ -725,7 +746,8 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     # 文字三级保险，替代原顶部小 ✓ 按钮（真机无字色块）
     btn_done = _step("构造完成按钮", lambda: TextView(activity))
     _step("完成按钮文字",
-          lambda: _set_text(btn_done, DONE_BTN_TEXT),
+          lambda: _set_text(
+              btn_done, BROWSE_BTN_TEXT if browse else DONE_BTN_TEXT),
           critical=False)
     _step("完成按钮底色",
           lambda: btn_done.setBackgroundColor(_jcolor(C_DONE_BG)),
@@ -735,7 +757,7 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
     _step("完成按钮字号", lambda: btn_done.setTextSize(17.0), critical=False)
     _step("完成按钮居中", lambda: btn_done.setGravity(17), critical=False)
     click_done = _step("构造完成点击回调",
-                       lambda: _ClickListener(on_manual_done))
+                       lambda: _ClickListener(_only_now(on_manual_done)))
     _step("完成按钮绑定点击",
           lambda: btn_done.setOnClickListener(click_done))
     _step("完成按钮入容器", lambda: root.addView(btn_done,
@@ -762,7 +784,8 @@ def _ui_open(url, title, on_manual_done, on_cancel, on_key_back):
         except Exception:
             return Dialog(activity)
     dialog = _step("构造全屏Dialog", _new_dialog)
-    cancel_cb = _step("构造取消监听", lambda: _CancelListener(on_cancel))
+    cancel_cb = _step("构造取消监听",
+                      lambda: _CancelListener(_only_now(on_cancel)))
     _step("Dialog可取消", lambda: dialog.setCancelable(True))
     _step("挂载取消监听", lambda: dialog.setOnCancelListener(cancel_cb))
     _step("Dialog装载内容", lambda: dialog.setContentView(root))
@@ -829,7 +852,10 @@ def _ui_close():
     ② Dialog.dismiss 为主、removeView 兜底（v1.8.2 防幽灵层）；
     ③ 全部对象（含 webview/dialog/root）经 _retire 进退休列表，
        即使解绑在个别 ROM 上未生效，回调对象仍存活不会闪退。
+    ④会话作废（v2.1.0）：session 递增，旧层一切在途/迟到回调
+      一律忽略。
     """
+    _STATE["session"] += 1
     dialog = _STATE["dialog"]
     root = _STATE["root"]
     wv = _STATE["webview"]
@@ -914,6 +940,9 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
         raise WebLoginError("pyjnius 不可用")
     if _STATE["root"] is not None:
         raise WebLoginError("已有登录窗口打开中")
+    # v2.1.0：作废上一会话一切迟到回调（上一层的渲染崩溃等
+    # 回调此刻才到也直接忽略）
+    _STATE["session"] += 1
 
     _STATE["on_cancel"] = on_cancel
     _STATE["done"] = False
@@ -1032,6 +1061,9 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
 
     def _poll():
         keys = [k.lower() for k in auth_keys]
+        # v2.1.0 首轮延迟 3s：层 show 后的 Chromium 启动渲染窗口
+        # 绝不与"特征命中秒关层"竞争（Cookie 仍活着的重登场景）
+        time.sleep(3.0)
         while not _STATE["closed"].is_set():
             p = _STATE["poller"]
             if p is None or p.get("stop"):
@@ -1049,6 +1081,96 @@ def open_login(url, auth_keys=(), on_done=None, title="登录",
     t = threading.Thread(target=_poll, daemon=True)
     _STATE["poller"] = {"stop": False}
     t.start()
+    return True
+
+
+def open_browse(url, title="网盘", on_close=None):
+    """打开网盘浏览层（v2.1.0：已登录直入网页版文件页）。
+
+    已登录用户点卡片：带 Cookie 直开网页版"我的文件"页——用户在
+    WebView 里浏览/长按复制文件或分享链接，点底部按钮回到下载
+    屏粘贴加速。不再走登录层：已登录再开登录页时 poller 首轮特
+    征即命中，层 show 后 1-2s 被秒关，dismiss 与 Chromium 启动渲
+    染竞争即真机"已登录点卡片闪退"根因；且已登录用户要的是
+    "进我账号选东西下载"，不是再看一遍登录页。
+
+    导航守卫/桌面 UA/返回键/渲染崩溃处理与登录层完全一致；无
+    poller、无 Cookie 采集校验（浏览不动账簿）。
+    on_close(): 层关闭（✕/返回键/手势/底部按钮）后回调（调用方
+        切下载屏引导粘贴链接；回调在 Android UI 线程执行，只做
+        调度不做 IO——v2.0.1 教训）。
+    返回 True 表示已打开；失败抛 WebLoginError。
+    """
+    if not _JNIUS_OK:
+        raise WebLoginError("pyjnius 不可用")
+    if _STATE["root"] is not None:
+        raise WebLoginError("已有窗口打开中")
+    _STATE["session"] += 1
+    _STATE["on_cancel"] = on_close
+    _STATE["done"] = False
+    _STATE["nav_log"] = []
+
+    def _end():
+        # 底部"去下载"按钮：关层 + on_close（_ui_close 标准
+        # 三层防御 + 会话作废；本函数在 Android UI 线程执行）
+        _STATE["done"] = True
+        try:
+            _run_ui(_ui_close)
+        except Exception:
+            _retire("root", "webview", "dialog", "client_cb", "key_cb",
+                    "cancel_cb", "click_cbs", "btn_done")
+            _STATE["closed"].set()
+        cb = _STATE.get("on_cancel")
+        _STATE["on_cancel"] = None
+        if cb is not None:
+            try:
+                cb()
+            except Exception:
+                pass
+
+    def _cancel():
+        close_login()
+
+    def _key_back():
+        # 网页可后退先 goBack（浏览模式核心操作），否则关层
+        wv = _STATE["webview"]
+        try:
+            if wv is not None and wv.canGoBack():
+                wv.goBack()
+                return
+        except Exception:
+            pass
+        _cancel()
+
+    opened = {}
+    opened_evt = threading.Event()
+    aborted = []
+
+    def _safe_open():
+        try:
+            if aborted:
+                return
+            _ui_open(url, title, _end, _cancel, _key_back, browse=True)
+            if aborted:
+                _ui_close()
+                return
+            opened["ok"] = True
+        except Exception as e:
+            opened["err"] = f"{type(e).__name__}: {e}"
+        finally:
+            opened_evt.set()
+
+    try:
+        _run_ui(_safe_open)
+    except Exception as e:
+        raise WebLoginError(f"无法调度UI线程: {e}")
+    if not opened_evt.wait(8.0):
+        aborted.append(True)
+        _STATE["closed"].set()
+        raise WebLoginError("UI线程8秒无响应（UI线程可能被阻塞）")
+    if not opened.get("ok"):
+        _STATE["closed"].set()
+        raise WebLoginError(f"浏览层挂载失败: {opened.get('err')}")
     return True
 
 

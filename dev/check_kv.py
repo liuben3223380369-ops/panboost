@@ -111,7 +111,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "2.0.1", "壳版本未升级到 2.0.1"
+    assert m.SHELL_VERSION == "2.1.0", "壳版本未升级到 2.1.0"
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
     # SDL 返回键 trap + 百度 PC 登录页（v1.8.1 桌面 UA 无效的根因：
@@ -330,6 +330,27 @@ def main():
     seg201 = msrc[i_on_done:i_later]
     assert "applog." not in seg201 and "_dump_nav_log" not in seg201, \
         "on_done 回调线程仍有 IO（v2.0.1 必须零工作）"
+
+    # v2.1.0 已登录直入浏览模式 + 会话竞态总闸：
+    # ①已登录卡片 open_browse 带 Cookie 直开网页版文件页（不再
+    #   二次打开登录层——poller 首轮特征命中秒关层与 Chromium
+    #   启动竞争即真机"已登录点卡片闪退"根因）
+    # ②_STATE.session 会话总闸：一切迟到回调按会话校验忽略
+    # ③poller 首轮延迟 3s
+    wsrc = Path(ROOT).joinpath("mobile", "weblogin.py").read_text(
+        encoding="utf-8")
+    assert "def open_browse" in wsrc, "weblogin 缺浏览模式"
+    assert '"session": 0' in wsrc and '_STATE["session"] += 1' in wsrc, \
+        "weblogin 缺会话总闸"
+    assert wsrc.count("_only_now") >= 6, "回调未全会话校验包装"
+    assert "time.sleep(3.0)" in wsrc, "poller 缺首轮延迟"
+    assert "BROWSE_BTN_TEXT" in wsrc and "browse=True" in wsrc, \
+        "浏览模式按钮/分支缺失"
+    for p in m.PANS:
+        assert p.get("home"), f"{p['key']} 缺 home（网页版文件页）"
+    assert hasattr(m.PanBoostApp, "_open_browse"), "缺 _open_browse"
+    assert "weblogin.open_browse(" in msrc, "pan_login 未分流浏览模式"
+    assert "进入我的网盘" in msrc, "已登录卡片缺入口文案"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

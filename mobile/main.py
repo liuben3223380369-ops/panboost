@@ -150,7 +150,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "2.0.1"
+SHELL_VERSION = "2.1.0"
 
 
 def register_font():
@@ -607,7 +607,7 @@ BoxLayout:
                 valign: 'middle'
 
         Label:
-            text: '点击网盘卡片登录（Cookie 永久保存，下载自动携带）'
+            text: '已登录点卡片直达我的网盘（复制链接去下载页加速）；未登录点卡片登录'
             font_size: sp(12)
             color: 0.396, 0.447, 0.533, 1
             size_hint_y: None
@@ -1068,7 +1068,8 @@ class PanBoostApp(App):
             rec = acc.get(pan["key"])
             if rec is not None and rec.get("verified", True):
                 txt = (f"{pan['name']}\n"
-                       "[b][color=#16a34a]已登录[/color][/b]\n"
+                       "[b][color=#16a34a]已登录[/color][/b] "
+                       "[color=#2563eb]进入我的网盘 ›[/color]\n"
                        f"[sub]{pan['domains'][0]}[/sub]")
             elif rec is not None:
                 # v1.8.5：Cookie 已保存但无法验证登录态（localStorage
@@ -1094,14 +1095,50 @@ class PanBoostApp(App):
         except Exception:
             pass
 
+    def _open_browse(self, pan_key):
+        """已登录网盘：WebView 直开网页版"我的文件"（浏览模式）。"""
+        pan = PAN_BY_KEY.get(pan_key)
+
+        def on_close():
+            def _ui():
+                applog.info("browse", "%s 浏览层关闭" % pan_key)
+                self.go("download")
+                self._home_status(
+                    f"把在 {pan['name']} 复制的文件/分享链接粘贴到"
+                    "本页，点开始下载即可加速")
+            _on_ui_later(_ui)
+
+        weblogin.open_browse(pan["home"], pan["name"], on_close=on_close)
+        applog.info("browse", "打开 %s 我的网盘（%s）"
+                    % (pan["name"], pan["home"]))
+        self._home_status(
+            f"已打开 {pan['name']} 我的网盘——浏览/长按复制文件或"
+            "分享链接，完成后点底部按钮回到下载页")
+
     def pan_login(self, pan_key):
-        """点击网盘卡片：WebView 登录（Android）或手动粘贴回退。"""
+        """点击网盘卡片：已登录直入我的网盘；未登录 WebView 登录。"""
         pan = PAN_BY_KEY.get(pan_key)
         if pan is None:
             return
         if self.worker is not None and self.worker.is_alive():
             self._home_status("下载进行中，请等待完成后再登录")
             return
+        # v2.1.0：已登录卡片直入网盘浏览模式——不再二次打开登录
+        # 层（真机"已登录点卡片闪退"根因：poller 首轮特征 Cookie
+        # 即命中 → 层 show 后 1-2s 被秒关，dismiss 与 Chromium 启
+        # 动渲染竞争即 SIGSEGV；且已登录用户要的是"进我账号选
+        # 东西下载"，不是再看一遍登录页）
+        acc = load_accounts()
+        rec = acc.get(pan_key)
+        if rec is not None and rec.get("verified", True) \
+                and pan.get("home") and weblogin.available():
+            try:
+                self._open_browse(pan_key)
+                return
+            except Exception as e:
+                _dump_crash("open_browse[%s]: " % pan_key)
+                self._home_status(
+                    f"打开网盘失败（{type(e).__name__}），改开登录页")
         err_txt = None
         if weblogin.available():
             def on_done(cookie, auto):
