@@ -316,7 +316,8 @@ def main():
     wsrc = Path(_wl.__file__).read_text(encoding="utf-8")
     # v3.2.0 独立 Activity：UI/WebView/校验全在 Java 侧
     _java_dir = Path(mobile_main.__file__).parent / "java_classes"
-    lsrc = (_java_dir / "LoginActivity.java").read_text(encoding="utf-8")
+    lsrc = (_java_dir / "LoginLayer.java").read_text(encoding="utf-8")
+    psrc = (_java_dir / "PanMainActivity.java").read_text(encoding="utf-8")
     jtxt = (_java_dir / "PanWebViewClient.java").read_text(
         encoding="utf-8")
     check("壳-登录层桌面UA防跳下载App页",
@@ -368,11 +369,11 @@ def main():
           and "UrlLoadingCallback" in jtxt
           and "browser_fallback_url" in lsrc
           and "browser_fallback_url" in wsrc,
-          "Java桥接类+LoginActivity实现回调")
-    check("壳-返回键onBackPressed系统级处理（v3.2.0）",
-          "onBackPressed" in lsrc and "canGoBack" in lsrc
-          and "notifyCancel" in lsrc,
-          "canGoBack 先退网页，否则取消并 finish")
+          "Java桥接类+LoginLayer实现回调")
+    check("壳-返回键onBackPressed系统级处理（v3.2.2 主入口接管）",
+          "onBackPressed" in psrc and "handleBack" in psrc
+          and "canGoBack" in lsrc and "notifyCancel" in lsrc,
+          "PanMainActivity 接管→层内 canGoBack 先退网页→否则关层")
     java_path = Path(mobile_main.__file__).parent / "java_classes" \
         / "PanWebViewClient.java"
     check("壳-Java桥接类存在且覆写双签名",
@@ -385,14 +386,17 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.2.1",
-          mobile_main.SHELL_VERSION == "3.2.1", mobile_main.SHELL_VERSION)
-    check("壳-返回黑屏三防线（v3.2.1）",
-          "Theme_Translucent_NoTitleBar" in lsrc
-          and "detachWebView" in lsrc
-          and "about:blank" in lsrc
+    check("壳-壳版本3.2.2",
+          mobile_main.SHELL_VERSION == "3.2.2", mobile_main.SHELL_VERSION)
+    check("壳-黑屏根治架构（v3.2.2 主 Activity 从不退场）",
+          "addContentView" in lsrc and "handleBack" in lsrc
+          and "closeLayer" in lsrc and "about:blank" in lsrc
           and "Window.canvas.ask_update()" in py_src,
-          "Translucent防onStop+GPU预释放+强制重绘")
+          "层叠加主Activity内+关闭清场+强制重绘兜底")
+    check("壳-自定义主入口PanMainActivity（manifest 换名）",
+          "extends org.kivy.android.PythonActivity" in psrc
+          and "LoginLayer.handleBack" in psrc,
+          "p4a --android-entrypoint 注册，Python 启动链全继承")
 
     # ---- v1.8.4 修复"三色弹窗无内容 + 点击闪退" ----
     check("壳-结果回调双端防GC（Python退休+Java置null）",
@@ -400,11 +404,11 @@ def main():
           and "def _retire" in wsrc
           and "sCallback = null" in lsrc,
           "pyjnius proxy 只存指针不持引用")
-    check("壳-登录层独立Activity承载（v3.2.0 根治弹窗不显示）",
+    check("壳-登录层addContentView承载（v3.2.2 非弹窗非独立页）",
           'autoclass("android.app.Dialog")' not in wsrc
-          and "extends Activity" in lsrc
-          and "setContentView" in lsrc,
-          "系统级窗口，无 Dialog 时序/主题 wrap 竞争")
+          and "addContentView" in lsrc
+          and "org/panboost/login/LoginLayer$Callback" in wsrc,
+          "全屏 View 叠加：无 Dialog 时序竞争、无 Activity 返回黑屏")
     check("壳-渲染进程崩溃处理已接通（防杀）",
           "onRenderProcessGone" in jtxt
           and "onRenderGone" in lsrc,
@@ -421,7 +425,7 @@ def main():
           "LinearLayout weight=1 标准剩余空间分配")
     check("壳-WebView先构建后加载（attach后loadUrl）",
           lsrc.index("root.addView(wv")
-          < lsrc.index("wv.loadUrl(loginUrl)"),
+          < lsrc.index("wv.loadUrl(sLoginUrl)"),
           "未 attach 就 loadUrl 部分ROM不渲染")
     check("壳-登录凭证校验（防游客Cookie误记已登录）",
           "未检测到登录凭证" in lsrc
@@ -516,9 +520,9 @@ def main():
               c2 is None and "boom" in (e2 or ""), f"err={e2!r}")
     finally:
         _wl.current_cookies = _oc
-    check("壳-LoginActivity状态导出与清理接口（Java 侧）",
+    check("壳-LoginLayer状态导出与清理接口（Java 侧）",
           "dumpNavLog" in lsrc and "clearNavLog" in lsrc
-          and "finishSelf" in lsrc,
+          and "closeLayer" in lsrc and "isOpen" in lsrc,
           "Python 侧 nav_log/close_login 依赖的 Java 静态方法")
 
     # ---- v1.9.1 根治"登录完成后直接闪退"（关闭时序三层防御） ----
@@ -526,11 +530,11 @@ def main():
           "def _retire" in wsrc and '"retired": []' in wsrc
           and "del rl[:-6]" in wsrc,
           "回调对象延迟回收，封死 dismiss 后飞行回调窗口")
-    check("壳-Activity销毁兜底通知（v3.2.0 生命周期化）",
-          "onDestroy" in lsrc
+    check("壳-层关闭兜底通知与幂等（v3.2.2）",
+          "closeLayer" in lsrc and "sFinished" in lsrc
           and "wv.destroy()" in lsrc
-          and "sInstance = null" in lsrc,
-          "任何退出路径都发一次结果；WebView 销毁防泄漏")
+          and "sCallback = null" in lsrc,
+          "任何关闭路径只发一次结果；WebView 销毁防泄漏")
 
     _saved = dict(_wl._STATE)
     try:
@@ -560,13 +564,13 @@ def main():
 
 
     # ---- v1.8.3 Dialog 承载 + onPageStarted 导航观测 ----
-    check("壳-登录层独立Activity承载（v3.2.0 系统级窗口）",
+    check("壳-登录层LoginLayer承载（v3.2.2 主 Activity 内）",
           'autoclass("android.app.Dialog")' not in wsrc
-          and "org/panboost/login/LoginActivity$Callback" in wsrc
-          and "LoginActivity.start" in wsrc
-          and "extends Activity" in lsrc
-          and "onBackPressed" in lsrc,
-          "启动单一静态方法+一次性结果回调")
+          and "org/panboost/login/LoginLayer$Callback" in wsrc
+          and "LoginLayer.start" in wsrc
+          and "addContentView" in lsrc
+          and "onBackPressed" in psrc,
+          "启动单一静态方法+一次性结果回调+主入口接管返回键")
     check("壳-onPageStarted导航观测已接入（Java 侧）",
           "onPageStarted" in lsrc and "onPageFinished" in lsrc
           and "stopLoading" in lsrc
@@ -619,7 +623,7 @@ def main():
     check("壳-浏览模式与会话总闸（v2.1.0→v3.2.0 Java 轮询）",
           "def open_browse" in wsrc210
           and '"session": 0' in wsrc210
-          and "postDelayed(pollRunnable, 3000)" in lsrc
+          and "postDelayed(sPollRunnable, 3000)" in lsrc
           and "postDelayed(this, 1200)" in lsrc
           and "bool(browse)" in wsrc210,
           "浏览模式+会话总闸+Java poller首轮3s延迟")

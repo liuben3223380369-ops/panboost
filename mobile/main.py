@@ -151,7 +151,12 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.2.1"
+SHELL_VERSION = "3.2.2"
+# v3.2.2：登录层架构回归主 Activity 内（LoginLayer addContentView
+# 全屏叠加 + PanMainActivity 重写 onBackPressed）——真机实锤
+# v3.2.0/v3.2.1 独立 LoginActivity 返回后 Kivy 主循环永不恢复
+# （applog 停在“打开网页登录”，回调链日志全缺失 → 纯黑卡住），
+# 主 Activity 从不退场后该路径结构性消除
 
 
 def register_font():

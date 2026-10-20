@@ -6,30 +6,29 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 3.2.1
+version = 3.2.2
 
 requirements = python3,kivy,certifi,pyjnius
 
-# v3.2.1 修复登录完成返回后 UI 纯黑卡住（三防线）：①LoginActivity
-# onCreate 设 Translucent 主题（内容不透明视觉不变，但 PythonActivity
-# 不进 onStop——SDL surface 不销毁）②finish 前同步 detachWebView
-# （Chromium GPU 资源先于 EGL 重建释放）③main.py on_resume 强制
-# ask_update 重绘兜底。
-# v3.2.0 登录页独立 Activity 化（根治 Dialog 弹窗在部分真机
-# "层不出现/WebView 区空白"）：
-# - PanWebViewClient.java：WebViewClient 桥接（pyjnius 只能实现
-#   接口不能继承抽象类）——导航守卫/渲染崩溃处理
-# - LoginActivity.java：独立全屏登录/浏览页（Java 侧完整实现
-#   UI + Cookie 采集校验 + 自动轮询），Python 侧只启动+收结果
+# v3.2.2 登录层回归主 Activity 内（真机实锤 v3.2.0/v3.2.1 独立
+# LoginActivity 返回后 Kivy 主循环永不恢复→纯黑卡住）：
+# - LoginLayer.java：登录/浏览全屏 View 层（addContentView 叠加
+#   在 SDL surface 之上，非 Dialog 弹窗；Java 侧完整实现 UI +
+#   Cookie 采集校验 + 自动轮询 + 导航守卫），主 Activity 从不
+#   退场——SDL surface 与 Kivy 主循环全程存活
+# - PanMainActivity.java：主入口（extends PythonActivity），仅
+#   重写 onBackPressed 接管返回键/手势（LoginLayer.handleBack：
+#   WebView 可后退先退网页，否则关层）——v1.8.3 当年 SDL trap
+#   吞手势被迫用 Dialog 的问题由重写主 Activity 根治
 # v1.8.2~v1.8.5 历史功能全部保留（导航守卫、onPageStarted 市场
 # 页拦截、onRenderProcessGone 防杀 App、auth_keys 特征校验）
-android.add_src = java_classes/PanWebViewClient.java, java_classes/LoginActivity.java
+android.add_src = java_classes/PanWebViewClient.java, java_classes/LoginLayer.java, java_classes/PanMainActivity.java
 
-# v3.2.0：LoginActivity 注册进 manifest（p4a --add-activity 渲染
-# <activity android:name> 到 <application> 内；无 intent-filter
-# 无需 exported 声明，继承 application 主题，默认主进程与
-# PythonActivity 共享 pyjnius 静态字段/回调）
-android.add_activities = org.panboost.login.LoginActivity
+# v3.2.2：主入口换成 PanMainActivity——manifest 的 android:name
+# 由 p4a --android-entrypoint 渲染（经 p4a.extra_args 透传）；
+# --activity-class-name 同步改 android recipe 的 pyjnius 配置
+android.activity_class_name = org.panboost.PanMainActivity
+p4a.extra_args = --android-entrypoint org.panboost.PanMainActivity
 
 # 固定 p4a 到稳定 release（hostpython 3.11.5）；master 的 hostpython
 # 3.14.2 会让纯依赖解析拉 cp314 android wheel → 平台不兼容报错

@@ -78,11 +78,11 @@ def main():
     # + UI 线程异步异常静默丢失）CI 无法运行 WebView，靠静态扫描防回归
     import weblogin
     wsrc = Path(weblogin.__file__).read_text(encoding="utf-8")
-    # v3.2.0 独立 Activity：UI 全在 Java 侧（颜色/文字编译期类型
-    # 保证），Python 侧只启动与收结果——启动失败必须同步抛出
-    assert "LoginActivity" in wsrc, "未接入独立登录 Activity"
+    # v3.2.2 主 Activity 内 LoginLayer：UI 全在 Java 侧（颜色/文字
+    # 编译期类型保证），Python 侧只启动与收结果——启动失败必须同步抛出
+    assert "LoginLayer" in wsrc, "未接入 LoginLayer 登录层"
     assert "登录页启动失败" in wsrc, "start 失败未同步抛出（fire-and-forget）"
-    assert 'org/panboost/login/LoginActivity$Callback' in wsrc, \
+    assert 'org/panboost/login/LoginLayer$Callback' in wsrc, \
         "回调接口签名异常"
     assert hasattr(weblogin, "open_login") and hasattr(weblogin, "available")
     # 按钮回调必须经 _guard 兜底（异常可见，不静默进 logcat）
@@ -108,7 +108,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.2.1", "壳版本未升级到 3.2.1"
+    assert m.SHELL_VERSION == "3.2.2", "壳版本未升级到 3.2.2"
 
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
@@ -128,22 +128,33 @@ def main():
         encoding="utf-8")
     assert "android.add_src" in spec and "PanWebViewClient.java" in spec, \
         "spec 未把 Java 桥接类编入 APK（android.add_src）"
-    # v3.2.0 独立 Activity 架构门禁
-    assert "LoginActivity.java" in spec, "spec 未编入 LoginActivity"
-    assert "android.add_activities = org.panboost.login.LoginActivity" \
-        in spec, "LoginActivity 未注册进 manifest（add_activities）"
-    login_java = Path(ROOT) / "mobile" / "java_classes" / "LoginActivity.java"
-    assert login_java.exists(), "缺 LoginActivity.java（独立登录页）"
-    lsrc = login_java.read_text(encoding="utf-8")
-    assert "extends Activity" in lsrc, "LoginActivity 未继承 Activity"
-    # v3.2.1 真机"登录完成返回后 UI 纯黑卡住"三防线：
-    # ①Translucent 主题（PythonActivity 不 onStop，SDL surface 不销毁）
-    # ②finish 前同步 detachWebView（Chromium GPU 先于 EGL 重建释放）
-    # ③on_resume 强制 ask_update 重绘（surface 恢复事件丢失兜底）
-    assert "Theme_Translucent_NoTitleBar" in lsrc, \
-        "缺 Translucent 主题（黑屏主根因：不透明全屏遮挡致 onStop）"
-    assert "detachWebView" in lsrc, "缺 WebView 预释放（GPU 竞争防线）"
-    assert "about:blank" in lsrc, "detachWebView 缺 about:blank 清场"
+    # v3.2.2 架构门禁（LoginLayer + PanMainActivity）：
+    # 真机实锤 v3.2.0/v3.2.1 独立 Activity 返回后 Kivy 主循环永不
+    # 恢复（applog 停在"打开网页登录"→纯黑卡住）——登录层必须留在
+    # 主 Activity 内（addContentView），主 Activity 从不退场
+    assert "LoginLayer.java" in spec, "spec 未编入 LoginLayer"
+    assert "PanMainActivity.java" in spec, "spec 未编入 PanMainActivity"
+    assert "android.add_activities" not in spec, \
+        "应已移除独立 Activity 注册（黑屏死路）"
+    assert "android.activity_class_name = org.panboost.PanMainActivity" \
+        in spec, "主入口未换 PanMainActivity（pyjnius 配置）"
+    assert "p4a.extra_args = --android-entrypoint org.panboost.PanMainActivity" \
+        in spec, "manifest 主入口未透传（--android-entrypoint）"
+    layer_java = Path(ROOT) / "mobile" / "java_classes" / "LoginLayer.java"
+    assert layer_java.exists(), "缺 LoginLayer.java（登录层）"
+    lsrc = layer_java.read_text(encoding="utf-8")
+    assert "addContentView" in lsrc, \
+        "登录层未用 addContentView 叠加（主 Activity 不退场的根基）"
+    assert "handleBack" in lsrc, "缺 handleBack（返回键入口）"
+    assert "closeLayer" in lsrc, "缺 closeLayer（关闭路径）"
+    assert "about:blank" in lsrc, "关闭序列缺 about:blank 清场"
+    pan_java = Path(ROOT) / "mobile" / "java_classes" / "PanMainActivity.java"
+    assert pan_java.exists(), "缺 PanMainActivity.java（自定义主入口）"
+    psrc = pan_java.read_text(encoding="utf-8")
+    assert "extends org.kivy.android.PythonActivity" in psrc, \
+        "主入口未继承 PythonActivity（Python 启动链断裂）"
+    assert "onBackPressed" in psrc, "主入口未接管返回键"
+    assert "LoginLayer.handleBack" in psrc, "返回键未接入登录层"
     assert "Window.canvas.ask_update()" in msrc, \
         "缺 on_resume 强制重绘（黑屏兜底防线）"
     assert "setWebViewClient" in lsrc, "未设置 WebViewClient（导航逃逸根因）"
@@ -171,8 +182,8 @@ def main():
     # "登录页不能展示信息"根治）；返回键/手势由 onBackPressed
     # 系统级处理（canGoBack 先退网页再退出）
     assert 'autoclass("android.app.Dialog")' not in wsrc, "Dialog 弹窗承载应已移除（docstring 历史描述除外）"
-    assert "onBackPressed" in lsrc and "canGoBack" in lsrc, \
-        "缺系统返回键处理"
+    assert "onBackPressed" in psrc and "canGoBack" in lsrc, \
+        "缺系统返回键处理（主 Activity 接管 + 层内网页后退）"
     assert "onPageStarted" in lsrc and "onPageFinished" in lsrc, \
         "缺导航观测实现（Java 侧）"
     assert "onPageStarted" in jtxt and "onPageFinished" in jtxt, \
@@ -192,7 +203,7 @@ def main():
         "桥接类缺渲染进程崩溃处理（默认杀整个 App）"
     assert "onRenderGone" in jtxt and "onRenderGone" in lsrc, \
         "渲染崩溃处理未接通（Java 侧自动关闭页面）"
-    assert "wv.destroy()" in lsrc, "onDestroy 未销毁 WebView（防泄漏）"
+    assert "wv.destroy()" in lsrc, "closeLayer 未销毁 WebView（防泄漏）"
     assert "_on_ui" in msrc, "登录回调未调度回 Kivy 主线程（线程安全）"
     assert "Clock.schedule_once" in msrc, "缺 Clock 主线程调度"
 
@@ -256,10 +267,11 @@ def main():
     assert "def _retire" in wsrc, "缺 _retire（退休列表防 GC 闪退）"
     assert '"retired": []' in wsrc, "缺退休列表字段"
     assert "del rl[:-6]" in wsrc, "退休列表缺上限裁剪"
-    # v3.2.0：WebView 回调全在 Java 侧（无跨 JNI 飞行回调窗口），
-    # 结果回调对象经 _retire 延迟回收；Java 侧 onDestroy 兜底通知
-    assert "notifyCancel" in lsrc and "onDestroy" in lsrc, \
-        "缺 onDestroy 兜底取消通知（Python 状态机悬空防线）"
+    # v3.2.2：WebView 回调全在 Java 侧（无跨 JNI 飞行回调窗口），
+    # 结果回调对象经 _retire 延迟回收；层关闭幂等通知
+    assert "notifyCancel" in lsrc and "closeLayer" in lsrc, \
+        "缺关闭兜底取消通知（Python 状态机悬空防线）"
+    assert "sFinished" in lsrc, "缺一次性回调幂等保护"
 
     # v1.9.2 真机根治："登录完成后点保存没反应"——凭证校验未通过
     # 时仅靠 Toast（部分真机 ROM 静默失败），登录层保持打开且无
@@ -342,7 +354,7 @@ def main():
         "weblogin 缺会话总闸"
     # v3.2.0：poller 在 Java 侧（Handler postDelayed），首轮 3s
     # 防秒关页与启动渲染竞争的语义在 LoginActivity 落实
-    assert "postDelayed(pollRunnable, 3000)" in lsrc, \
+    assert "postDelayed(sPollRunnable, 3000)" in lsrc, \
         "poller 缺首轮延迟（渲染竞争防线）"
     assert "BROWSE_BTN" in lsrc and "bool(browse)" in wsrc, \
         "浏览模式按钮/分支缺失"

@@ -1,32 +1,26 @@
 #!/usr/bin/env python3
-"""Android 网盘登录模块（独立 LoginActivity，v3.2.0 全面重构）。
+"""Android 网盘登录模块（主 Activity 内 LoginLayer，v3.2.2 全面重构）。
 
 用户在真实网盘页面完成登录（含验证码/短信/扫码——浏览器引擎渲染，
 无需逆向任何网盘协议），登录后从 CookieManager 提取 Cookie 永久保存。
 
-v3.2.0 重构（真机反馈"登录页不能展示信息"——Dialog 层在部分真机
-上完全不出现或 WebView 区空白，两症状并存）：
-登录/浏览从 android.app.Dialog 弹窗改为独立 LoginActivity 全屏页面
-（Java 侧完整实现 UI + WebView + Cookie 采集校验 + 自动轮询 + 导航
-守卫，见 java_classes/LoginActivity.java）。跨 JNI 从"每秒轮询 +
-每次导航回调 + 每个按钮点击"缩到"一次启动 + 一次结果回调"，
-pyjnius 在 UI 操作上的多重载解析/静默失败风险整体消除。
+v3.2.2 架构（真机实锤 v3.2.0/v3.2.1 独立 LoginActivity 返回后
+UI 纯黑卡住——applog 停在"打开网页登录"，后续回调链日志全缺失：
+p4a SDL2 在"同进程第二 Activity finish 返回"场景 resume 事件
+不可靠，Kivy 主循环（Clock）永不恢复）：
+登录/浏览层回到主 Activity 内——LoginLayer（Java）addContentView
+全屏叠加 View 层（非 Dialog 弹窗），主 Activity 从不退场：
+- 无第二个 Activity / 无 finish / 无 resume 竞争——SDL surface
+  与 Kivy 主循环全程存活，on_done → Clock → _after_login 必然执行
+- 全屏不透明 View 盖在 SDL surface 上 = 完整原生页面视觉
+- 手势/返回键：主入口 PanMainActivity（extends PythonActivity，
+  p4a --android-entrypoint 注册）onBackPressed 先问
+  LoginLayer.handleBack()——v1.8.3 当年被迫用 Dialog 的 SDL trap
+  吞手势问题由重写主 Activity 根治
+- 触摸不穿透：层在 SDL surface 之上，WebView 消费（v1.8.2 验证）
 
-架构收益（对比 v1.8~v3.1 的 Dialog 方案）：
-- 登录页是系统级 Activity 窗口：显示/焦点/生命周期由系统窗口
-  管理器保证，不再依赖 Dialog 的 show 时序、主题 wrap 行为与
-  PhoneWindow 测量竞争（"层不出现/三色块/WebView 塌陷"三族
-  真机问题一次性根除）
-- LoginActivity 在前台时 Kivy 宿主整体 onPause：SDL 渲染、
-  触摸分发、返回键 trap 全部不再竞争
-- WebView 的导航守卫/渲染崩溃/返回键全部留在 Java 侧（编译期
-  类型检查），无跨 JNI 回调 GC 窗口；文字/颜色 Java 直接设置
-  （Python 侧 setText 多重载解析失败的静默色块问题不复存在）
-- 返回键/手势：onBackPressed 系统标准路径（canGoBack 先退
-  网页再退出），彻底摆脱 SDL trap
-
-跨 JNI 面只剩两处：
-1. LoginActivity.start(activity, url, title, keysCsv, urlsCsv,
+跨 JNI 面不变（v3.2.0 设计保留）：
+1. LoginLayer.start(activity, url, title, keysCsv, urlsCsv,
    ua, browse, cb) 静态启动——全参数 java.lang.String/boolean，
    单一方法无重载歧义，失败同步抛出（fire-and-forget 根治）
 2. Callback.onLoginResult/onLoginCancel 一次性结果回调——
@@ -35,7 +29,7 @@ pyjnius 在 UI 操作上的多重载解析/静默失败风险整体消除。
    双端防护）
 
 本模块保留的纯函数（_decide_url/_merge_cookies/_gather_cookies/
-_parse_intent_uri）与 LoginActivity.java 内的 Java 实现同规格——
+_parse_intent_uri）与 LoginLayer.java 内的 Java 实现同规格——
 作为行为规格参照 + 离线可测（smoke 直接测行为），运行路径全部
 在 Java 侧。
 
@@ -64,7 +58,7 @@ DESKTOP_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-# WebView 导航黑名单（与 LoginActivity.java MARKET_PREFIXES 同规格）：
+# WebView 导航黑名单（与 LoginLayer.java MARKET_PREFIXES 同规格）：
 # 市场/商店类 URL 直接停止加载——这些是"跳到下载网盘APP界面"的最终
 # 落地页（onPageStarted 守卫，302 落地不经过 shouldOverrideUrlLoading）
 MARKET_PREFIXES = (
@@ -93,14 +87,14 @@ def _activity():
 
 
 class _LoginCallback(PythonJavaClass):
-    """LoginActivity$Callback 的 Python 实现（v3.2.0）。
+    """LoginLayer$Callback 的 Python 实现（v3.2.0 设计保留）。
 
     onLoginResult/onLoginCancel 在 Android UI 线程回调——内部只做
     内存状态切换 + 调用调用方回调（约定零 IO 零 Kivy 操作：磁盘
     日志与界面更新由调用方延迟调度，v2.0.1 教训）。异常全吞（Java
     侧已 catch Throwable 双保险，这里再兜一层）。
     """
-    __javainterfaces__ = ["org/panboost/login/LoginActivity$Callback"]
+    __javainterfaces__ = ["org/panboost/login/LoginLayer$Callback"]
     __javacontext__ = "app"
 
     def __init__(self, on_result, on_cancel):
@@ -145,7 +139,7 @@ def _jstr(s):
     """Python str 转 java.lang.String 对象。
 
     putExtra/setText 等**多重载**方法在部分真机 ROM 上 pyjnius
-    解析失败（v1.9.0 实锤）——LoginActivity.start 全参数显式传
+    解析失败（v1.9.0 实锤）——LoginLayer.start 全参数显式传
     java.lang.String，Java 侧类型精确匹配无重载歧义。
     失败时返回原样 str（调用方 try/except 兜底）。
     """
@@ -182,7 +176,7 @@ def _merge_cookies(*parts):
     网盘登录跳转常把 Cookie 种在关联域（如百度在
     passport.baidu.com 登录、pan.baidu.com 使用）——只查登录页
     URL 会漏。分号拆键值合并，后出现的键覆盖先前值。
-    返回合并串；全空返回 None。（运行路径在 LoginActivity.java
+    返回合并串；全空返回 None。（运行路径在 LoginLayer.java
     gatherCookies，此函数供离线测试与规格对照）
     """
     out = {}
@@ -228,7 +222,7 @@ def _decide_url(url, parse_intent=None):
       file:// javascript: about: 空 URL…）→ (True, None) 一律拦截
       ——这正是"跳到下载网盘APP界面"的逃逸通道。
 
-    运行路径在 LoginActivity.java onUrlLoading/parseIntentFallback
+    运行路径在 LoginLayer.java onUrlLoading/parseIntentFallback
     （同规格实现）；此函数供离线测试。
     """
     if not url:
@@ -251,7 +245,7 @@ def _parse_intent_uri(url):
 
     安全加固：addCategory(BROWSABLE) + setComponent(None) +
     setSelector(None)，防 intent scheme hijacking（页面定向拉起
-    App 私有组件）。（运行路径在 LoginActivity.java
+    App 私有组件）。（运行路径在 LoginLayer.java
     parseIntentFallback，同规格）
     """
     if not _JNIUS_OK:
@@ -267,7 +261,7 @@ def _parse_intent_uri(url):
 def current_cookies(url):
     """取 WebView 里 url 域的 Cookie（含 httpOnly）。失败返回 None。
 
-    v3.2.0 起运行采集在 LoginActivity.java（Java 侧）；本函数保留
+    v3.2.0 起运行采集在 LoginLayer.java（Java 侧）；本函数保留
     供 Python 侧诊断调用与离线 mock 测试（v1.9.1 曾误删此函数致
     点保存必失败——防回归门禁要求符号存在）。
     """
@@ -300,7 +294,7 @@ def current_cookies(url):
 
 def _start_activity(url, title, auth_keys, cookie_urls, browse,
                     on_result, on_cancel):
-    """启动 LoginActivity（内部公共路径，v3.2.0 核心）。
+    """启动 LoginLayer（内部公共路径，v3.2.2 核心）。
 
     单一静态方法调用：全参数显式 java.lang.String/boolean，无重载
     歧义；任何失败同步抛出（fire-and-forget 根治，v1.7.0 教训）。
@@ -310,9 +304,9 @@ def _start_activity(url, title, auth_keys, cookie_urls, browse,
     keys_csv = ",".join(k for k in auth_keys if k)
     urls_csv = ",".join(u for u in cookie_urls if u)
     try:
-        LoginActivity = autoclass("org.panboost.login.LoginActivity")
+        LoginLayer = autoclass("org.panboost.login.LoginLayer")
         activity = _activity()
-        LoginActivity.start(
+        LoginLayer.start(
             activity, _jstr(url), _jstr(title or "登录"),
             _jstr(keys_csv), _jstr(urls_csv),
             _jstr(DESKTOP_UA), bool(browse), cb)
@@ -432,7 +426,7 @@ def open_browse(url, title="网盘", on_close=None):
 def nav_log():
     """导航日志快照（真机诊断"到底跳去了哪"）。
 
-    LoginActivity.java 侧维护（"kind|epochMillis|msg"），本函数取回
+    LoginLayer.java 侧维护（"kind|epochMillis|msg"），本函数取回
     转换为 (kind, "HH:MM:SS", msg) 三元组列表（与历史版本同格式，
     调用方落盘逻辑无需变更）；最近 80 条。
     """
@@ -440,8 +434,8 @@ def nav_log():
     if not _JNIUS_OK:
         return out
     try:
-        LoginActivity = autoclass("org.panboost.login.LoginActivity")
-        raw = LoginActivity.dumpNavLog()
+        LoginLayer = autoclass("org.panboost.login.LoginLayer")
+        raw = LoginLayer.dumpNavLog()
         for item in raw:
             parts = str(item).split("|", 2)
             if len(parts) == 3:
@@ -472,8 +466,8 @@ def close_login():
         return
     try:
         if _JNIUS_OK:
-            LoginActivity = autoclass("org.panboost.login.LoginActivity")
-            LoginActivity.finishSelf()
+            LoginLayer = autoclass("org.panboost.login.LoginLayer")
+            LoginLayer.closeLayer()
     except Exception:
         _retire("callback")
         _STATE["closed"].set()
@@ -482,8 +476,7 @@ def close_login():
 def request_back():
     """Kivy 层键盘返回键兜底（保留接口兼容）。
 
-    v3.2.0 起登录页在前台时 Kivy 宿主整体 onPause 收不到按键——
-    系统返回键由 LoginActivity.onBackPressed 系统级处理；本函数
-    仅为兼容既有调用点。
+    v3.2.2 起系统返回键由 PanMainActivity.onBackPressed 系统级
+    处理（LoginLayer.handleBack）；本函数仅为兼容既有调用点。
     """
     close_login()
