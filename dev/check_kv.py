@@ -195,8 +195,8 @@ def main():
     assert "android.R$style" in wsrc, "缺系统主题常量引用"
     assert "LLParams(-1, 0, 1.0)" in wsrc, \
         "WebView 未用 weight 布局（wrap 窗口下 MATCH_PARENT 塌陷 0）"
-    idx_load = wsrc.find('_step("WebView入容器"')
-    idx_add = wsrc.find('_step("加载登录页"')
+    idx_add = wsrc.find('_step("WebView入容器"')
+    idx_load = wsrc.find('_step("加载登录页"')
     assert 0 < idx_add < idx_load, "loadUrl 必须在 addView 之后（未 attach 不渲染）"
     assert "def _toast" in wsrc, "缺 Toast 提示（凭证校验失败反馈）"
     assert "_fallback_after_block" in wsrc, "缺拦截回退（空白屏根因）"
