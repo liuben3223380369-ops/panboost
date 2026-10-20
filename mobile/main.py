@@ -151,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.1.0"
+SHELL_VERSION = "3.1.1"
 
 
 def register_font():
@@ -1085,6 +1085,37 @@ BoxLayout:
                 size_hint_x: 0.6
                 on_release: app.start_selected_downloads()
 
+        BoxLayout:
+            id: files_retry_box
+            size_hint_y: None
+            height: dp(0)
+            opacity: 0
+            spacing: dp(8)
+            CardButton:
+                id: files_retry_btn
+                text: '🔄 重新加载'
+                font_size: sp(13)
+                bg: 0.145, 0.388, 0.922, 1
+                bg_down: 0.118, 0.298, 0.761, 1
+                color: 1, 1, 1, 1
+                on_release: app.files_retry()
+            CardButton:
+                id: files_web_btn
+                text: '改用网页版'
+                font_size: sp(13)
+                on_release: app.files_open_web()
+
+        Label:
+            id: files_error_detail
+            text: ''
+            font_size: sp(10)
+            color: 0.7, 0.2, 0.2, 1
+            size_hint_y: None
+            height: dp(0)
+            text_size: self.size
+            halign: 'left'
+            valign: 'middle'
+
 
 <FileRow>:
     orientation: 'horizontal'
@@ -1953,11 +1984,19 @@ class PanBoostApp(App):
 
             def ui():
                 self._drive_loading = False
+                ids = self._scr("files").ids
                 if entries is None:
-                    self._scr("files").ids.files_info.text = (
-                        "加载失败（%s）——点返回重试，或改用网页版"
-                        % type(err).__name__)
+                    ids.files_info.text = (
+                        "加载失败（%s）" % type(err).__name__)
+                    ids.files_error_detail.text = (
+                        str(err)[:200] if err else "未知错误")
+                    ids.files_retry_box.height = dp(42)
+                    ids.files_retry_box.opacity = 1
+                    ids.files_error_detail.height = dp(28)
                     return
+                ids.files_retry_box.height = dp(0)
+                ids.files_retry_box.opacity = 0
+                ids.files_error_detail.height = dp(0)
                 if push:
                     self._drive_ctx["stack"].append((fid, name))
                 self._drive_ctx["entries"] = entries
@@ -2001,6 +2040,26 @@ class PanBoostApp(App):
             self._toggle_file(i)
         except Exception:
             pass
+
+    def files_retry(self):
+        """加载失败重试（v3.1.1）：重拉当前目录。"""
+        if self._drive_ctx is None:
+            return
+        ctx = self._drive_ctx
+        stack = ctx.get("stack", [])
+        if stack:
+            fid, name = stack[-1]
+        else:
+            fid, name = "0", "我的网盘"
+        self._fetch_drive(ctx["pan_key"], fid, name, push=False)
+
+    def files_open_web(self):
+        """加载失败改用网页版（v3.1.1）。"""
+        if self._drive_ctx is None:
+            return
+        pan_key = self._drive_ctx["pan_key"]
+        self._drive_ctx = None
+        self._open_browse(pan_key)
 
     def files_back(self):
         """文件屏返回（v3.1.0 双形态）。
