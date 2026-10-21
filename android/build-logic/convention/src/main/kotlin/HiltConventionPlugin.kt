@@ -5,18 +5,19 @@ import org.gradle.kotlin.dsl.dependencies
 import org.gradle.kotlin.dsl.getByType
 
 /**
- * Hilt 约定（第 1 周：纯 KSP 路径）。
+ * Hilt 约定（第 1 周）。
  *
- * Hilt 2.5x 在 KSP 模式下无需 dagger.hilt.android.plugin（该
- * gradle plugin 只提供聚合任务转换），挂 KSP + hilt-android/
- * hilt-compiler 依赖即可完成 @HiltAndroidApp/@AndroidEntryPoint/
- * @Inject 的完整编译链——少一个 classpath 依赖即少一个版本坑。
+ * CI 实锤：@AndroidEntryPoint/@HiltAndroidApp 必须挂 Hilt Gradle
+ * Plugin（com.google.dagger.hilt.android——对注解做字节码变换
+ * 补 value），纯 KSP 路径只适用于部分 Dagger SPI 场景；本插件
+ * 挂 plugin + KSP + hilt-android/hilt-compiler 依赖的完整链。
  */
 class HiltConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
             val libs = extensions.getByType<VersionCatalogsExtension>()
                 .named("libs")
+            pluginManager.apply("com.google.dagger.hilt.android")
             pluginManager.apply("com.google.devtools.ksp")
 
             dependencies {

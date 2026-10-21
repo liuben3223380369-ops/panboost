@@ -32,9 +32,11 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx"
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 
-# Hilt（第 1 周：纯 KSP 路径，无需 hilt gradle plugin）
+# Hilt（@AndroidEntryPoint/@HiltAndroidApp 需要 hilt gradle plugin
+# 做字节码变换给注解补 value——CI 实锤纯 KSP 路径不适用）
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
+hilt-gradlePlugin = { module = "com.google.dagger:hilt-android-gradle-plugin", version.ref = "hilt" }
 
 # 测试
 junit = { module = "junit:junit", version.ref = "junit" }
