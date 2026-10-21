@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit
  *   完成后顺序合并进 MediaStore → part 清理
  * - **断点续传**：part 文件按块偏移保留，重跑任务跳过已完成块
  *   （块粒度 .part{i}，崩溃/取消后续传）
- * - **服务器不支持 Range**：降级单流（UrlDownloadWorker 语义）
+ * - **服务器不支持 Range**：降级单流（同 v4.0 单 Worker 语义）
  */
 @HiltWorker
 class MultiThreadDownloadWorker @AssistedInject constructor(
@@ -90,6 +90,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                             endExclusive = minOf((i + 1) * block, total),
                             partFile = File(dir, "part$i"),
                             onProgress = { done, total2 ->
+                                // v4.1.0：suspend setProgress 经 suspend 回调上抛
                                 setProgress(
                                     androidx.work.workDataOf(
                                         MockDownloadWorker.KEY_BYTES to done,
@@ -162,14 +163,14 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
     }
 
     /** 单块下载（含 part 断点续传：已有完整 part 直接跳过）。 */
-    private fun downloadBlock(
+    private suspend fun downloadBlock(
         client: OkHttpClient,
         url: String,
         referer: String,
         start: Long,
         endExclusive: Long,
         partFile: File,
-        onProgress: (Long, Long) -> Unit,
+        onProgress: suspend (Long, Long) -> Unit,
     ) {
         if (start >= endExclusive) return
         if (partFile.length() == endExclusive - start) {
