@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 第 1 周骨架：无任何权限（MediaStore/WorkManager 权限第 2 周按需加） -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<!-- 第 2 周：无任何权限（MediaStore 写公共 Download 零权限） -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:name=".PanBoostApplication"
@@ -17,6 +18,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 第 2 周：禁用 WorkManager 默认初始化（App 经
+             Configuration.Provider 提供 HiltWorkerFactory） -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 
 </manifest>
