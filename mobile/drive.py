@@ -27,6 +27,7 @@ WebView。首版支持夸克网盘；其他网盘 list_files 返回 None，调�
 """
 import json
 import os
+import ssl
 import urllib.parse
 import urllib.request
 
@@ -79,11 +80,33 @@ def _merge_set_cookie(cookie, resp):
     return cookie
 
 
+def _ssl_ctx():
+    """HTTPS SSL 上下文（v3.2.4，与引擎 make_ssl_context 同模型）。
+
+    真机实锤（v3.2.3 日志）：拉取文件列表在连接层即炸——p4a 打包
+    的 CPython 在 Android 上没有系统 CA bundle 路径（/etc/ssl/
+    certs 不存在），urlopen 默认 HTTPS 验证失败。引擎下载一直
+    正常正是因为引擎自己接了 certifi；本层此前漏接。
+
+    certifi.where() 优先；certifi 不可用时回退不验证上下文——
+    本层只拉用户自己账号的文件列表/直链（带用户自己的登录
+    Cookie），与引擎下载同一信任模型（README 安全边界一致）。
+    """
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except (ImportError, ValueError, ssl.SSLError):
+        try:
+            return ssl._create_unverified_context()
+        except Exception:
+            return None
+
+
 def _get_json(pan_key, cookie, url, on_cookie):
     with urllib.request.urlopen(
             urllib.request.Request(
                 url, headers=dict(QUARK_HEADERS, Cookie=cookie or "")),
-            timeout=20) as r:
+            timeout=20, context=_ssl_ctx()) as r:
         new_ck = _merge_set_cookie(cookie or "", r)
         data = json.loads(r.read().decode("utf-8", "replace"))
     if new_ck != (cookie or "") and on_cookie:
@@ -146,7 +169,8 @@ def get_download_url(pan_key, cookie, fid, on_cookie=None):
         req = urllib.request.Request(url, data=body, headers=dict(
             QUARK_HEADERS, Cookie=cookie or "",
             **{"Content-Type": "application/json"}))
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=20,
+                                     context=_ssl_ctx()) as r:
             new_ck = _merge_set_cookie(cookie or "", r)
             data = json.loads(r.read().decode("utf-8", "replace"))
         if new_ck != (cookie or "") and on_cookie:

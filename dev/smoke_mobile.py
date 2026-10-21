@@ -386,8 +386,8 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.2.3",
-          mobile_main.SHELL_VERSION == "3.2.3", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.2.4",
+          mobile_main.SHELL_VERSION == "3.2.4", mobile_main.SHELL_VERSION)
     check("壳-黑屏根治架构（v3.2.2 主 Activity 从不退场）",
           "addContentView" in lsrc and "handleBack" in lsrc
           and "closeLayer" in lsrc and "about:blank" in lsrc
@@ -996,6 +996,14 @@ def main():
           "%d 行" % len(rows310))
     hlogs = [h for h in srv4.header_log
              if h["path"] == "/1/clouddrive/file/sort"]
+    drive_src = Path(mobile_main.__file__).parent.joinpath(
+        "drive.py").read_text(encoding="utf-8")
+    check("壳-drive层SSL上下文（v3.2.4 Android CA 修复）",
+          "def _ssl_ctx" in drive_src
+          and "certifi.where()" in drive_src
+          and "ssl._create_unverified_context" in drive_src
+          and drive_src.count("context=_ssl_ctx()") == 2,
+          "certifi CA+不验证回退，列表/直链两处全接")
     check("壳-夸克API请求头规格（Referer+客户端UA）",
           hlogs and hlogs[0]["Referer"] == "https://pan.quark.cn/"
           and "quark-cloud-drive" in (hlogs[0]["UA"] or ""),

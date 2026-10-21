@@ -108,7 +108,7 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.2.3", "壳版本未升级到 3.2.3"
+    assert m.SHELL_VERSION == "3.2.4", "壳版本未升级到 3.2.4"
 
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +
@@ -440,6 +440,15 @@ def main():
         encoding="utf-8")
     assert "drive-pc.quark.cn" in dsrc, "drive 层缺夸克 API 端点"
     assert "Set-Cookie" in dsrc, "缺 __puus Cookie 保活合并"
+    # v3.2.4 真机"拉取文件列表失败"（连接层即炸）根因：Android 上
+    # 无系统 CA bundle 路径，urlopen 默认 HTTPS 验证失败——引擎
+    # 自己接了 certifi 所以下载一直正常，drive 层此前漏接
+    assert "def _ssl_ctx" in dsrc, "drive 层缺 SSL 上下文（CA 修复）"
+    assert "certifi.where()" in dsrc, "未用 certifi CA（Android 无系统 CA）"
+    assert "ssl._create_unverified_context" in dsrc, \
+        "缺不验证回退（与引擎同一信任模型）"
+    assert dsrc.count("context=_ssl_ctx()") == 2, \
+        "列表/直链两处请求未全接 SSL 上下文"
 
     # 浅色主题断言：页面底色接近白（亮度>0.9）
     r, g, b, _a = m.BG

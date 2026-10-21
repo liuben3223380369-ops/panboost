@@ -151,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.2.3"
+SHELL_VERSION = "3.2.4"
 # v3.2.2：登录层架构回归主 Activity 内（LoginLayer addContentView
 # 全屏叠加 + PanMainActivity 重写 onBackPressed）——真机实锤
 # v3.2.0/v3.2.1 独立 LoginActivity 返回后 Kivy 主循环永不恢复
@@ -162,6 +162,9 @@ SHELL_VERSION = "3.2.3"
 # new Handler(Looper.getMainLooper()) 处 NPE 崩溃（部分 ROM
 # 从 SDL 线程取主 Looper 返回 null）；轮询/按钮恢复改
 # View.postDelayed 彻底去掉自建 Handler
+# v3.2.4：drive 层补 SSL 上下文（certifi CA + 回退，与引擎
+# make_ssl_context 同模型）——Android 上无系统 CA 路径，
+# 网盘列表 HTTPS 请求在连接层即炸（真机日志实锤）
 
 
 def register_font():
