@@ -15,6 +15,7 @@ espresso = "3.6.1"
 work = "2.10.0"
 androidxHilt = "1.2.0"
 coroutines = "1.10.2"
+navigation = "2.8.9"
 
 [libraries]
 # 供 build-logic 的 convention plugin classpath
@@ -44,6 +45,10 @@ hilt-gradlePlugin = { module = "com.google.dagger:hilt-android-gradle-plugin", v
 # Kotlin 协程（domain Flow / Worker）
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+
+# Navigation（第 3 周起：单 Activity NavHost）
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 
 # WorkManager（第 2 周：下载 Worker 持久化队列）
 work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
