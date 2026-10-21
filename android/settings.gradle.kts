@@ -32,4 +32,7 @@ rootProject.name = "PanBoost"
 include(":app")
 include(":core:domain")
 include(":core:data")
+include(":core:network")
 include(":feature:download")
+include(":feature:login")
+include(":feature:home")

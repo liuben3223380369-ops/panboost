@@ -19,7 +19,10 @@ dependencies {
 
     implementation(project(":core:domain"))
     implementation(project(":core:data"))
+    implementation(project(":core:network"))
     implementation(project(":feature:download"))
+    implementation(project(":feature:login"))
+    implementation(project(":feature:home"))
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.junit)

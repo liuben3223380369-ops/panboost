@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -38,6 +39,19 @@ class DownloadRepositoryImpl @Inject constructor(
         get() = WorkManager.getInstance(context)
 
     override fun enqueue(task: DownloadTask) {
+        val request = if (task.url.startsWith("mock://")) {
+            mockRequest(task)
+        } else {
+            urlRequest(task)
+        }
+        workManager.enqueueUniqueWork(
+            uniqueName(task.id),
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
+    }
+
+    private fun mockRequest(task: DownloadTask): OneTimeWorkRequest {
         val request = OneTimeWorkRequestBuilder<MockDownloadWorker>()
             .setInputData(
                 workDataOf(
@@ -58,12 +72,22 @@ class DownloadRepositoryImpl @Inject constructor(
             )
             .addTag(TAG)
             .build()
-        workManager.enqueueUniqueWork(
-            uniqueName(task.id),
-            ExistingWorkPolicy.KEEP,
-            request,
-        )
+        return request
     }
+
+    /** 真实下载（第 4 周链路：URL 直链 + Referer 流式写）。 */
+    private fun urlRequest(task: DownloadTask): OneTimeWorkRequest =
+        OneTimeWorkRequestBuilder<UrlDownloadWorker>()
+            .setInputData(
+                workDataOf(
+                    UrlDownloadWorker.KEY_URL to task.url,
+                    UrlDownloadWorker.KEY_REFERER to "https://pan.quark.cn/",
+                    MockDownloadWorker.KEY_FILE_NAME to task.fileName,
+                    MockDownloadWorker.KEY_MIME to task.mimeType,
+                )
+            )
+            .addTag(TAG)
+            .build()
 
     override fun observeAll(): Flow<List<DownloadTask>> =
         workManager.getWorkInfosByTagFlow(TAG)

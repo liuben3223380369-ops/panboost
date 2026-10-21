@@ -10,7 +10,10 @@ android {
 
 dependencies {
     api(project(":core:domain"))
+    api(project(":core:network"))
     api(libs.work.runtime.ktx)
+
+    implementation(libs.okhttp)
 
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
