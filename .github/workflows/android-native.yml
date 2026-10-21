@@ -53,28 +53,4 @@ jobs:
           fi
           echo "零权限验证通过（无 MANAGE_EXTERNAL_STORAGE）"
           # v4.1.0：R8 保真门禁——关键 URL/类必须在 dex 中（防过度裁剪产出残废 APK）
-          python3 -c 'import zipfile,sys; dex=zipfile.ZipFile("android/app/build/outputs/apk/release/app-release.apk").read("classes.dex"); keys=[b"drive-pc.quark.cn",b"pan.quark.cn",b"OkHttpClient",b"Lorg/panboost",b"MultiThreadDownloadWorker"]; missing=[k.decode() for k in keys if k not in dex]; sys.exit(f"::error::R8 过度裁剪，缺失: {missing}") if missing else print("R8 保真校验通过")
-
-      - name: Rename APK
-        run: |
-          cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-4.1.0-android.apk; done
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: panboost-native-release
-          path: android/app/build/outputs/apk/release/*.apk
-
-      - name: Publish to Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NOTES_FILE: release-notes.txt
-        run: |
-          printf '%s\n' 'PanBoost v4.1.0——多线程分块下载 + 前台服务版。' '基于最新 Android 官方架构实践（Now in Android 范式对照优化）的三项核心升级：①多线程分块下载——旧 Python 引擎的核心竞争力完成原生重建：Range 探测 + 8 并发协程分块 + 块粒度断点续传（崩溃/取消后重跑自动跳过已完成块）+ 不支持 Range 的服务器自动降级单流；②前台服务规范化——Android 14+ 长时下载 Worker 强制要求 dataSync 前台服务：下载中常驻系统通知（显示进度）、退后台/锁屏不再被系统冻结（Kivy 时代前台服务杀进程闪退的正规替代方案）；③R8 full mode 压缩——release 构建开启代码压缩+资源收缩，APK 体积显著优化（debug 签名可直接安装）。' 'v4.0.0 原生重构（5 周计划）：Kotlin + Compose 全面重写，模块化架构（core/domain、core/data、core/network、feature/*），WebView 登录 + 原生网盘列表 + WorkManager 持久化下载队列 + MediaStore 零权限写公共 Download。' '权限说明：网络 + 前台服务 + 通知，仍然零存储权限（公共下载目录走系统正规通道）。' '异常反馈请附：操作步骤 + 系统版本 + 现象描述。' > "$NOTES_FILE"
-          TAG="android-v4.1.0"
-          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.1.0（多线程分块+前台服务）" --latest --notes-file "$NOTES_FILE"
-          fi
+          python3 -c "import zipfile,sys; dex=zipfile.ZipFile('android/app/build/outputs/apk/release/app-release.apk').read('classes.dex'); keys=[b'drive-pc.quark.cn',b'pan.quark.cn',b'OkHttpClient',b'Lorg/panboost',b'MultiThreadDownloadWorker']; missing=[k.decode() for k in keys if k not in dex]; sys.exit('::error::R8 过度裁剪, 缺失: '+str(missing)) if missing else print('R8 保真校验通过')"
