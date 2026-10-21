@@ -108,7 +108,29 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.2.6", "壳版本未升级到 3.2.6"
+    assert m.SHELL_VERSION == "3.2.7", "壳版本未升级到 3.2.7"
+
+    # v3.2.7 根治"探测通过但引擎写入被拒"：差异在打开模式——
+    # 探测 open('wb') 豁免，引擎 os.open(O_RDWR) 被 FUSE 拒
+    #（公共目录拒发读写打开，Errno 13）。三层修复门禁：
+    pbsrc = Path(ROOT).joinpath("panboost.py").read_text(
+        encoding="utf-8")
+    assert "def open_output" in pbsrc, "引擎缺 open_output 降级"
+    assert "os.O_WRONLY | os.O_CREAT" in pbsrc, \
+        "引擎缺 O_WRONLY 降级（O_RDWR 被拒的兜底）"
+    assert pbsrc.count("open_output(") >= 3, \
+        "数据文件/锁文件未全走 open_output 降级"
+    assert "errno.EACCES" in pbsrc, "flock 缺 FUSE fail-open"
+    assert pbsrc.count("except PermissionError") >= 2, \
+        "引擎缺 ftruncate/打开的 PermissionError 降级"
+    assert "os.O_WRONLY | os.O_CREAT" in msrc, \
+        "探测未对齐引擎降级路径（O_WRONLY+pwrite）"
+    assert "os.pwrite(fd, b\"ok\", 1024)" in msrc, \
+        "探测缺超 EOF 扩展写（引擎 pwrite 同语义）"
+    assert "_FORCE_PRIVATE" in msrc and "_run_download_once" in msrc, \
+        "缺运行时自愈（被拒→私有目录重试）"
+    assert "except PermissionError as e:" in msrc, \
+        "缺 PermissionError 穿透分支（不记失败历史）"
 
     # v3.2.5 真机"公共 Download 写入被拒（Errno 13）"根治门禁：
     # Android 11+ 上 targetSdk 33 无运行时权限可直写公共 Download

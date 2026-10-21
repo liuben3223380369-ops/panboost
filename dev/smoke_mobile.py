@@ -386,8 +386,28 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.2.6",
-          mobile_main.SHELL_VERSION == "3.2.6", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.2.7",
+          mobile_main.SHELL_VERSION == "3.2.7", mobile_main.SHELL_VERSION)
+    msrc = Path(mobile_main.__file__).read_text(encoding="utf-8")
+    eng_src = Path(mobile_main.__file__).parent.joinpath(
+        "panboost.py").read_text(encoding="utf-8")
+    check("壳-引擎FUSE写兼容（v3.2.7 O_RDWR→O_WRONLY降级）",
+          "def open_output" in eng_src
+          and "os.O_WRONLY | os.O_CREAT" in eng_src
+          and eng_src.count("open_output(") >= 3
+          and "errno.EACCES" in eng_src
+          and eng_src.count("except PermissionError") >= 2,
+          "open_output降级+flock fail-open+ftruncate降级")
+    check("壳-探测对齐引擎真实路径（v3.2.7）",
+          "os.O_WRONLY | os.O_CREAT" in msrc
+          and "os.pwrite(fd, b\"ok\", 1024)" in msrc,
+          "O_WRONLY+pwrite超EOF扩展写")
+    check("壳-写入被拒运行时自愈（v3.2.7）",
+          "_FORCE_PRIVATE" in msrc
+          and "_run_download_once" in msrc
+          and "except PermissionError as e:" in msrc
+          and "已自动改存应用目录重试" in msrc,
+          "被拒→落闸→私有目录重试→下载永不失败")
     msrc = Path(mobile_main.__file__).read_text(encoding="utf-8")
     check("壳-公共Download权限链（v3.2.6 根治 Errno 13）",
           ".probe.apk" in msrc

@@ -151,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.2.6"
+SHELL_VERSION = "3.2.7"
 # v3.2.2：登录层架构回归主 Activity 内（LoginLayer addContentView
 # 全屏叠加 + PanMainActivity 重写 onBackPressed）——真机实锤
 # v3.2.0/v3.2.1 独立 LoginActivity 返回后 Kivy 主循环永不恢复
@@ -162,6 +162,13 @@ SHELL_VERSION = "3.2.6"
 # new Handler(Looper.getMainLooper()) 处 NPE 崩溃（部分 ROM
 # 从 SDL 线程取主 Looper 返回 null）；轮询/按钮恢复改
 # View.postDelayed 彻底去掉自建 Handler
+# v3.2.7：根治"探测通过但引擎写入仍被拒（Errno 13）"——差异
+# 在打开模式：探测 open('wb') 豁免通过，引擎 os.open(O_RDWR)
+# 被 FUSE 拒（公共目录拒发读写打开）。引擎降级（O_RDWR→
+# O_WRONLY + flock/ftruncate fail-open，纯 pwrite 写功能完备）；
+# 探测对齐引擎真实路径（O_WRONLY+pwrite 扩展写）；真实写入若
+# 仍被拒则 _FORCE_PRIVATE 落闸自动改存应用目录重试（下载永不
+# 失败）
 # v3.2.6：①根治"公共 Download 写入被拒"——Android 11+ 上
 # targetSdk 33 无任何运行时权限可直写公共 Download 媒体文件
 # （.write_test 探测误判：非媒体文件允许直写），申请
@@ -324,14 +331,16 @@ _PUB_DL_OK = None
 
 
 def _probe_public_download():
-    """公共 Download 可写性探测（v3.2.6 修正：必须用媒体后缀）。
+    """公共 Download 可写性探测（v3.2.7：对齐引擎真实写路径）。
 
-    真机实锤：Android 11+ scoped storage 允许 App 在公共 Download
-    里用文件路径直接创建**非媒体文件**（.txt/.write_test——v3.0.0
-    的探测因此误判通过），但**媒体文件**（.apk/.mp4 等）必须走
-    MediaStore 或"所有文件访问权限"——引擎打开 .apk 即
-    PermissionError（真机日志 Errno 13）。探测文件必须用 .apk
-    后缀，探测结果才与真实下载一致。
+    两轮真机实锤的教训：
+    - v3.2.5：探测 open('wb') 通过，引擎 os.open(O_RDWR) 被拒
+      （Errno 13）——FUSE 对公共目录拒发读写打开；
+    - v3.2.6：探测改 .apk 后缀仍误判（差异不在后缀在打开模式）。
+    v3.2.7 引擎已降级（O_RDWR→O_WRONLY + flock/ftruncate
+    fail-open），探测必须模拟**降级后的最终路径**：
+    os.open(O_WRONLY|O_CREAT) + pwrite 超 EOF 写（文件扩展
+    语义）+ unlink——探测通过即引擎必能写。
     """
     from jnius import autoclass
     Env = autoclass("android.os.Environment")
@@ -339,22 +348,30 @@ def _probe_public_download():
     d = os.path.join(str(base.getAbsolutePath()), "PanBoost")
     os.makedirs(d, exist_ok=True)
     probe = os.path.join(d, ".probe.apk")
-    with open(probe, "wb") as f:
-        f.write(b"ok")
+    fd = os.open(probe, os.O_WRONLY | os.O_CREAT, 0o644)
+    try:
+        os.pwrite(fd, b"ok", 1024)  # 超 EOF 写：文件扩展语义
+    finally:
+        os.close(fd)
     os.remove(probe)
     return d
+
+
+_FORCE_PRIVATE = {"on": False}
 
 
 def download_dir():
     """下载输出目录（v3.0.0：优先公共 Download/PanBoost）。
 
     公共目录文件管理器直接可见（用户诉求"下载的文件找不到"）。
-    v3.2.6：探测用媒体后缀（.probe.apk）真实反映可写性；未获
-    "所有文件访问权限"时 Android 11+ 上媒体文件被 scoped storage
-    拦截 → 回退 App 外部私有目录（必可写，下载永不失败）。
-    授权后 reset_download_dir_probe() 重探测自动切回公共目录。
+    v3.2.7：①探测对齐引擎真实写路径（O_WRONLY+pwrite 扩展）；
+    ②运行中真实写入若仍被拒（未知 FUSE 怪癖），_FORCE_PRIVATE
+    落闸后本次运行全走 App 私有目录（必可写，下载永不失败），
+    并自动重试该文件；重启 App 后重新探测（授权后有机会切回）。
     """
     global _PUB_DL_OK
+    if _FORCE_PRIVATE["on"]:
+        return external_files_dir()
     if _PUB_DL_OK is not None:
         return _PUB_DL_OK
     try:
@@ -1717,6 +1734,27 @@ class PanBoostApp(App):
 
     def _run_download(self, url, cookie, choice, insecure,
                       share_name=None, share_headers=None, share_url=None):
+        """下载入口（v3.2.7：公共目录被拒自动改存应用目录重试）。
+
+        探测可能漏掉未知 FUSE 怪癖——真实写入被拒（PermissionError）
+        时落 _FORCE_PRIVATE 闸 + 重置探测缓存 + 私有目录重试同一
+        文件，用户无感、下载永不失败。
+        """
+        self._pub_denied = None
+        self._run_download_once(url, cookie, choice, insecure,
+                                share_name, share_headers, share_url)
+        if getattr(self, "_pub_denied", None):
+            self._pub_denied = None
+            _FORCE_PRIVATE["on"] = True
+            reset_download_dir_probe()
+            self.log("公共目录被系统拒绝——已自动改存应用目录重试")
+            applog.info("download", "公共目录写入被拒，切私有目录重试")
+            self._run_download_once(url, cookie, choice, insecure,
+                                    share_name, share_headers, share_url)
+
+    def _run_download_once(self, url, cookie, choice, insecure,
+                           share_name=None, share_headers=None,
+                           share_url=None):
         # v1.8.0：分享链接先解析（蓝奏/123/夸克），多文件依次下载
         try:
             resolver = pb.find_resolver(url)
@@ -1806,6 +1844,14 @@ class PanBoostApp(App):
                 self.log(f"失败: {err}")
                 applog.error("download", "下载失败 %s: %s"
                              % (url[:96], err))
+        except PermissionError as e:
+            # v3.2.7：写路径被系统拒（FUSE/权限怪癖）——不记失败
+            # 历史，标记后由 _run_download 自愈重试（私有目录）
+            self._pub_denied = str(e)
+            self._status = "切换存储位置中…"
+            self.log(f"写入被系统拒绝: {e}")
+            applog.error("download", "写入被拒: %s（%s）"
+                         % (e, url[:96]), exc=e)
         except Exception as e:
             self._status = "失败"
             status = "失败"
@@ -1817,7 +1863,7 @@ class PanBoostApp(App):
         finally:
             self.dl = None
             stop_keepalive()
-            if out_name:
+            if out_name and not getattr(self, "_pub_denied", None):
                 add_history({"ts": int(time.time()),
                              "url": share_url or url,
                              "name": out_name, "size": size,

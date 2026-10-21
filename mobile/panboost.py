@@ -27,6 +27,7 @@ v1.3 反风控引擎 Pro：
   §9 CLI
 """
 import argparse
+import errno
 import fcntl
 import hashlib
 import http.client
@@ -274,11 +275,34 @@ def lock_file(fd, what):
     """
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        # v3.2.7：Android scoped storage 的 FUSE 对公共目录文件
+        # 拒绝 flock（EACCES 等）——降级无锁继续。图形壳内下载
+        # worker 有单例闸，锁为跨进程冗余防护；桌面/CLI 场景
+        # flock 正常工作（占用时 EWOULDBLOCK 仍走原报错路径）
+        eno = getattr(e, "errno", None)
+        if eno in (errno.EACCES, errno.EPERM, errno.ENOLCK,
+                   errno.EINVAL, errno.EBADF):
+            return
         raise DownloadError(
             f"{what} 正被另一个 PanBoost 进程下载（文件锁被占用）。"
             f"请等其完成后重试；若确认无其他进程，删除残留的"
             f"锁文件后重试") from None
+
+
+def open_output(path):
+    """打开下载数据文件（v3.2.7 Android FUSE 兼容）。
+
+    真机实锤：Android 11+ scoped storage 的 FUSE 对公共 Downloads
+    目录文件拒发 O_RDWR 打开（Errno 13；O_WRONLY|O_CREAT 创建与
+    O_RDONLY 读分别豁免）。先 O_RDWR（断点续传校验等场景），
+    EACCES 时降级 O_WRONLY——引擎对数据文件纯 pwrite 写
+    （pwrite/ftruncate/flock/fsync 均只需写权限），功能完备。
+    """
+    try:
+        return os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
+    except PermissionError:
+        return os.open(str(path), os.O_WRONLY | os.O_CREAT, 0o644)
 
 
 # =====================================================================
@@ -1402,10 +1426,15 @@ class MultiThreadDownloader:
             raise DownloadError(
                 f"磁盘空间不足：需要 {fmt_size(self.size)}"
                 f"（另有预留），可用 {fmt_size(free)}")
-        self.fd = os.open(str(self.output), os.O_RDWR | os.O_CREAT, 0o644)
+        self.fd = open_output(self.output)
         lock_file(self.fd, str(self.output))
         if os.fstat(self.fd).st_size != self.size:
-            os.ftruncate(self.fd, self.size)
+            try:
+                os.ftruncate(self.fd, self.size)
+            except PermissionError:
+                # v3.2.7：Android FUSE 可能拒绝预分配——跳过，
+                # pwrite 超过 EOF 自动扩展文件（稀疏写），等价
+                pass
         return True
 
     # ---- worker 主循环：取块 → _download_block（含重试/风控处理） ----
@@ -1810,7 +1839,7 @@ class SingleThreadDownloader:
     def run(self):
         self.output.parent.mkdir(parents=True, exist_ok=True)
         lock_path = Path(str(self.output) + LOCK_SUFFIX)
-        lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+        lock_fd = open_output(lock_path)
         try:
             lock_file(lock_fd, str(self.output))
             return self._run_locked()
