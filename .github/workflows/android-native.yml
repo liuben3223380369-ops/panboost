@@ -53,17 +53,7 @@ jobs:
           fi
           echo "零权限验证通过（无 MANAGE_EXTERNAL_STORAGE）"
           # v4.1.0：R8 保真门禁——关键 URL/类必须在 dex 中（防过度裁剪产出残废 APK）
-          python3 - <<'PYEOF_DEX'
-import zipfile
-with zipfile.ZipFile("android/app/build/outputs/apk/release/app-release.apk") as z:
-    dex = z.read("classes.dex")
-keys = [b"drive-pc.quark.cn", b"pan.quark.cn", b"OkHttpClient",
-        b"Lorg/panboost", b"MultiThreadDownloadWorker"]
-missing = [k.decode() for k in keys if k not in dex]
-if missing:
-    raise SystemExit(f"::error::R8 过度裁剪，关键内容缺失: {missing}")
-print("R8 保真校验通过（API 端点/关键类/引擎标记均在 dex）")
-PYEOF_DEX
+          python3 -c 'import zipfile,sys; dex=zipfile.ZipFile("android/app/build/outputs/apk/release/app-release.apk").read("classes.dex"); keys=[b"drive-pc.quark.cn",b"pan.quark.cn",b"OkHttpClient",b"Lorg/panboost",b"MultiThreadDownloadWorker"]; missing=[k.decode() for k in keys if k not in dex]; sys.exit(f"::error::R8 过度裁剪，缺失: {missing}") if missing else print("R8 保真校验通过")
 
       - name: Rename APK
         run: |
