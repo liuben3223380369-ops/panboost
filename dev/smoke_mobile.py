@@ -386,8 +386,15 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.2.4",
-          mobile_main.SHELL_VERSION == "3.2.4", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.2.5",
+          mobile_main.SHELL_VERSION == "3.2.5", mobile_main.SHELL_VERSION)
+    msrc = Path(mobile_main.__file__).read_text(encoding="utf-8")
+    check("壳-闪退雷源根除（v3.2.5 无 AndroidService）",
+          "from android import AndroidService" not in msrc
+          and '_KEEPALIVE = {"wl": None}' in msrc
+          and "⌂ 首页" in mobile_main.KV
+          and "radius: [dp(16)]" in mobile_main.KV,
+          "p4a服务onDestroy杀全进程→只留WakeLock+MD3导航")
     check("壳-黑屏根治架构（v3.2.2 主 Activity 从不退场）",
           "addContentView" in lsrc and "handleBack" in lsrc
           and "closeLayer" in lsrc and "about:blank" in lsrc
@@ -792,10 +799,10 @@ def main():
     check("壳-自动匹配Cookie下载完整",
           files and files[0].read_bytes() == data,
           f"保活日志: {[l for l in app.logs if '保活' in l][:1]}")
-    check("壳-前台服务start/stop各一次且下载结束已停",
-          SVC_CALLS["start"] == 1 and SVC_CALLS["stop"] == 1
-          and mobile_main._KEEPALIVE["svc"] is None,
-          str(SVC_CALLS))
+    check("壳-下载全程零服务调用（v3.2.5 闪退雷源根除）",
+          SVC_CALLS["start"] == 0 and SVC_CALLS["stop"] == 0
+          and mobile_main._KEEPALIVE["wl"] is None,
+          "AndroidService 不再被触碰（onDestroy 杀全进程雷源）")
     mobile_main.IS_ANDROID = False
 
     # ---- 历史 ----

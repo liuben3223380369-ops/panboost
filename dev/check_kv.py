@@ -108,7 +108,26 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.2.4", "壳版本未升级到 3.2.4"
+    assert m.SHELL_VERSION == "3.2.5", "壳版本未升级到 3.2.5"
+
+    # v3.2.5 真机"下载结束即闪退"根治门禁：p4a PythonService
+    # onDestroy() 有 Process.killProcess(myPid)——服务与主 App 同
+    # 进程，stop_keepalive→stopService→onDestroy 即杀全进程
+    # （30s 探测超时+开销≈38 秒闪退）。AndroidService 必须根除，
+    # 保活只留 PARTIAL_WAKE_LOCK（纯 JNI 无服务生命周期）
+    assert "from android import AndroidService" not in msrc, \
+        "仍用 AndroidService（onDestroy 杀全进程的闪退雷源）"
+    assert '_KEEPALIVE = {"wl": None}' in msrc, \
+        "keepalive 状态仍有 svc 字段（服务路径应已移除）"
+    assert 'svc' not in msrc.split("def stop_keepalive")[1].split(
+        "def load_accounts")[0].replace("stopService", ""), \
+        "stop_keepalive 仍有服务停止路径"
+    # v3.2.5 MD3 UI 现代化门禁
+    kv = m.KV
+    assert "⌂ 首页" in kv and "↓ 下载" in kv, \
+        "底部导航缺图标+文字（MD3 NavigationBar）"
+    assert "radius: [dp(16)]" in kv, "缺激活胶囊指示器（MD3 pill）"
+    assert kv.count("radius: [dp(14)]") >= 1, "卡片未升 MD3 大圆角"
 
 
     # v1.8.2 真机根治：WebViewClient 导航守卫 + WebView 层返回键 +

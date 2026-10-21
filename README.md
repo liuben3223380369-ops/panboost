@@ -204,7 +204,7 @@ python panboost.py download "直链" --cookie "..." -o ~/storage/downloads/movie
 
 ### 方式二：图形界面 APP（APK）
 
-仓库 `mobile/` 内置 Kivy 图形壳（v3.2.4 原生登录页版——
+仓库 `mobile/` 内置 Kivy 图形壳（v3.2.5 原生网盘列表版——
 已登录夸克"我的网盘"不再走 WebView PC 网页（触摸拖拽被网页
 解释成选择、无原生滚动），改调网盘 Web API + 原生文件列表：
 文件夹轻点进入、文件轻点勾选、批量加速下载，滑动/轻点即
@@ -417,7 +417,7 @@ download <URL>
 | 文件 | 说明 |
 |---|---|
 | `panboost.py` | 主程序（唯一需要的文件；v1.8.0 起内置蓝奏/123/夸克分享链接解析器） |
-| `mobile/` | Android 图形壳：`main.py` 界面逻辑、`pans.py` 网盘清单（数据）、`theme.py` 浅色色板、`weblogin.py` WebView 登录、`java_classes/PanWebViewClient.java` WebView 导航守卫（Java 桥接类，`android.add_src` 编入 APK）、`service_down.py` 前台保活服务 |
+| `mobile/` | Android 图形壳：`main.py` 界面逻辑、`pans.py` 网盘清单（数据）、`theme.py` 浅色色板、`weblogin.py` WebView 登录、`java_classes/PanWebViewClient.java` WebView 导航守卫（Java 桥接类，`android.add_src` 编入 APK）、`service_down.py` 服务入口（v3.2.5 起保活改用 WakeLock，不再起服务） |
 | `dev/RESEARCH_WEBVIEW_LOGIN.md` | WebView 登录页跳转/返回键问题的源码级调研报告（v1.8.2 修复依据，含 25 条来源） |
 | `test_server.py` | 测试用本地HTTP服务器（Range/限流/429+Retry-After/重定向/Cookie校验/JS挑战页/RST重置/混沌故障/拥塞排队/并发统计） |
 | `tests/` | 测试套件：`test_panboost.py` 功能测试（132项，`python3 tests/test_panboost.py` 运行）、`stress_test.py` 压力测试、`test_server.py` 本地测试服务器 |

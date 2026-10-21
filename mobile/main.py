@@ -151,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.2.4"
+SHELL_VERSION = "3.2.5"
 # v3.2.2：登录层架构回归主 Activity 内（LoginLayer addContentView
 # 全屏叠加 + PanMainActivity 重写 onBackPressed）——真机实锤
 # v3.2.0/v3.2.1 独立 LoginActivity 返回后 Kivy 主循环永不恢复
@@ -162,6 +162,12 @@ SHELL_VERSION = "3.2.4"
 # new Handler(Looper.getMainLooper()) 处 NPE 崩溃（部分 ROM
 # 从 SDL 线程取主 Looper 返回 null）；轮询/按钮恢复改
 # View.postDelayed 彻底去掉自建 Handler
+# v3.2.5：①根治"下载结束即闪退"——p4a PythonService.onDestroy
+# 的 Process.killProcess 杀同进程主 App（stop_keepalive→stopService
+# 触发，30s 探测超时+开销≈38 秒后闪退），移除 AndroidService 保活
+# 只留 PARTIAL_WAKE_LOCK；②UI MD3 现代化——底部导航图标+文字、
+# 激活态品牌蓝胶囊指示器（NavigationBar 规范）、卡片大圆角
+# dp(14)、主按钮 dp(48)
 # v3.2.4：drive 层补 SSL 上下文（certifi CA + 回退，与引擎
 # make_ssl_context 同模型）——Android 上无系统 CA 路径，
 # 网盘列表 HTTPS 请求在连接层即炸（真机日志实锤）
@@ -440,25 +446,22 @@ _install_crash_logger()
 
 # ---------------- 下载保活（前台服务 + WakeLock） ----------------
 
-_KEEPALIVE = {"svc": None, "wl": None}
+_KEEPALIVE = {"wl": None}
 
 
 def start_keepalive():
-    """下载开始：起前台服务 + 持 PARTIAL_WAKE_LOCK。
+    """下载开始：持 PARTIAL_WAKE_LOCK（v3.2.5 起唯一保活手段）。
 
-    Android 12+ 对后台应用冻结，前台服务是唯一可靠保活手段；
-    任何一步失败静默降级（下载仍靠引擎实时落盘保证）。"""
+    v3.2.4 及此前还起 p4a AndroidService 前台服务——真机实锤这是
+    "下载结束即闪退"的雷源：p4a 的 PythonService.onDestroy() 里有
+    Process.killProcess(Process.myPid())，而服务与主 App 同进程，
+    下载 finally 调 stop_keepalive() → stopService → onDestroy →
+    整个 App 被杀（30s 探测超时 + 开销 ≈ 用户实测的 38 秒闪退）。
+    v3.2.5 移除服务路径，只留 WakeLock（纯 JNI 调用，无服务
+    生命周期，不可能触发进程级 onDestroy）；锁屏下载保活由
+    WakeLock 承担，任何一步失败静默降级（引擎实时落盘兜底）。"""
     if not IS_ANDROID:
         return False
-    ok = False
-    try:
-        from android import AndroidService
-        _KEEPALIVE["svc"] = AndroidService(
-            "PanBoost 下载中", "多线程下载进行中，进度实时保存")
-        _KEEPALIVE["svc"].start("")
-        ok = True
-    except Exception:
-        _KEEPALIVE["svc"] = None
     try:
         from jnius import autoclass
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
@@ -468,20 +471,16 @@ def start_keepalive():
         wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PanBoost:dl")
         wl.acquire()
         _KEEPALIVE["wl"] = wl
-        ok = True
+        return True
     except Exception:
         _KEEPALIVE["wl"] = None
-    return ok
+        return False
 
 
 def stop_keepalive():
-    """下载结束：停服务、释放 WakeLock（必须释放防耗电）。"""
-    try:
-        if _KEEPALIVE["svc"] is not None:
-            _KEEPALIVE["svc"].stop()
-    except Exception:
-        pass
-    _KEEPALIVE["svc"] = None
+    """下载结束：释放 WakeLock（必须释放防耗电；v3.2.5 起无服务
+    路径——stopService 触发 p4a PythonService.onDestroy 的
+    Process.killProcess 杀全进程，是 v3.2.4 真机闪退根因）。"""
     try:
         if _KEEPALIVE["wl"] is not None:
             _KEEPALIVE["wl"].release()
@@ -606,7 +605,7 @@ KV = """
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(9)]
+            radius: [dp(14)]
     color: 0.118, 0.161, 0.231, 1
 
 <NavTab>:
@@ -615,11 +614,17 @@ KV = """
     background_color: 0, 0, 0, 0
     canvas.before:
         Color:
-            rgba: self.tab_bg if self.active else (0.071, 0.09, 0.141, 1)
+            rgba: 0.071, 0.09, 0.141, 1
         Rectangle:
             pos: self.pos
             size: self.size
-    color: (0.97, 0.98, 1, 1) if self.active else (0.616, 0.663, 0.741, 1)
+        Color:
+            rgba: 0.145, 0.388, 0.922, 0.22 if self.active else 0
+        RoundedRectangle:
+            pos: self.center_x - dp(26), self.y + dp(6)
+            size: dp(52), dp(32)
+            radius: [dp(16)]
+    color: (0.376, 0.612, 0.965, 1) if self.active else (0.616, 0.663, 0.741, 1)
     font_size: sp(12)
 
 <CompactOption>:
@@ -643,8 +648,8 @@ BoxLayout:
     BoxLayout:
         id: navbar
         size_hint_y: None
-        height: dp(54)
-        padding: dp(6), dp(5)
+        height: dp(64)
+        padding: dp(6), dp(8)
         spacing: dp(6)
         canvas.before:
             Color:
@@ -654,19 +659,19 @@ BoxLayout:
                 size: self.size
         NavTab:
             id: tab_home
-            text: '首页'
+            text: '⌂ 首页'
             on_release: app.go('home')
         NavTab:
             id: tab_download
-            text: '下载'
+            text: '↓ 下载'
             on_release: app.go('download')
         NavTab:
             id: tab_accounts
-            text: '账号'
+            text: '◉ 账号'
             on_release: app.go('accounts')
         NavTab:
             id: tab_history
-            text: '历史'
+            text: '≡ 历史'
             on_release: app.go('history')
         NavTab:
             id: tab_logs
@@ -731,7 +736,7 @@ BoxLayout:
             bg: 0.145, 0.388, 0.922, 1
             bg_down: 0.118, 0.298, 0.761, 1
             size_hint_y: None
-            height: dp(46)
+            height: dp(48)
             color: 1, 1, 1, 1
             on_release: app.go('download')
 
@@ -1880,7 +1885,7 @@ class PanBoostApp(App):
                 self._progress = 0.0
                 self._cancel = False
                 if start_keepalive():
-                    self.log("已开启前台保活（锁屏/后台下载不断流）")
+                    self.log("已开启唤醒锁（锁屏下载不断流）")
                 self.worker = threading.Thread(
                     target=self._run_drive_batch,
                     args=(sel, ctx["pan_key"]), daemon=True)
@@ -1901,7 +1906,7 @@ class PanBoostApp(App):
             self._progress = 0.0
             self._cancel = False
             if start_keepalive():
-                self.log("已开启前台保活（锁屏/后台下载不断流）")
+                self.log("已开启唤醒锁（锁屏下载不断流）")
             self.worker = threading.Thread(
                 target=self._run_share_batch,
                 args=(sel, ctx["url"], ctx["cookie"], ctx["choice"],
