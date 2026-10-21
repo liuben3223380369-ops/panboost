@@ -7,6 +7,14 @@ plugins {
 
 android {
     namespace = "org.panboost.app"
+
+    // v4.1.0：release 用 debug 签名（零配置可直接安装；
+    // 正式上架签名后续版本接 Play App Signing）
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
 }
 
 dependencies {

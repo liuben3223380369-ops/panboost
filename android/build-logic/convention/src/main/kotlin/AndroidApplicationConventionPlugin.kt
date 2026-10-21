@@ -35,7 +35,13 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 }
                 buildTypes {
                     release {
-                        isMinifyEnabled = false
+                        // v4.1.0：R8 full mode + 资源收缩（release 标配）
+                        isMinifyEnabled = true
+                        isShrinkResources = true
+                        proguardFiles(
+                            getDefaultProguardFile("proguard-android-optimize.txt"),
+                            "proguard-rules.pro"
+                        )
                     }
                 }
             }

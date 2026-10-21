@@ -35,13 +35,13 @@ jobs:
       - name: Generate Gradle wrapper
         run: cd android && gradle wrapper --gradle-version 8.13
 
-      - name: Assemble debug APK
-        run: cd android && ./gradlew assembleDebug --stacktrace
+      - name: Assemble release APK（v4.1.0：R8 minify + shrink）
+        run: cd android && ./gradlew assembleRelease --stacktrace
 
       - name: Smoke check APK（零权限验证：无 MANAGE_EXTERNAL_STORAGE）
         run: |
-          APK="android/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK" || { echo "::error::app-debug.apk 未生成"; exit 1; }
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK" || { echo "::error::app-release.apk 未生成"; exit 1; }
           ls -lh "$APK"
           # 第 5 周验收：公共 Download 走 MediaStore 零权限——
           # APK 内不得申请"所有文件访问"
@@ -55,24 +55,24 @@ jobs:
 
       - name: Rename APK
         run: |
-          cd android/app/build/outputs/apk/debug
-          for f in *.apk; do mv "$f" panboost-4.0.0-android.apk; done
+          cd android/app/build/outputs/apk/release
+          for f in *.apk; do mv "$f" panboost-4.1.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: panboost-native-debug
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: panboost-native-release
+          path: android/app/build/outputs/apk/release/*.apk
 
       - name: Publish to Release
         env:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v4.0.0——原生重构版（Kotlin + Compose）。' '按 5 周迁移计划完成的全面重写：告别 Python/Kivy 桥接层的四类结构性问题（WebView 黑屏、前台服务杀进程、公共目录直写权限、跨语言回调失效）。' 'v4.0.0 收官（第 5 周）：①清理全部旧 Kivy/p4a 代码（mobile/ 及配套校验链），仓库纯原生模块化（NIA 风格：core/domain、core/data、core/network、feature/login、feature/home、feature/download + Convention Plugins + Version Catalog）②targetSdk/compileSdk 36（Android 16）③零存储权限验证——公共 Download 写入走 MediaStore 正统路径，不申请"所有文件访问"（与旧版 MANAGE_EXTERNAL_STORAGE 方案的根本区别），文件管理器直接可见。' '完整功能链：WebView 官方登录（自动采集 Cookie）→ 原生网盘文件列表（公开 Web API + 用户 Cookie，面包屑导航）→ 点文件取直链 → WorkManager 持久化下载队列（进程死亡续跑）→ 实时进度/取消/重试/防重复排队 → Download/PanBoost。' '第 1-4 周里程碑：模块骨架与 Hilt 落地（assembleDebug 绿）→ MediaStore 写入 + WorkManager（模拟下载验收）→ MVI 下载屏（进度实时刷新验收）→ Retrofit 网络层 + 完整登录浏览下载链路（验收）。' '已知边界：多线程分块下载（旧引擎核心能力）计划后续版本以 Range 分块 + 并发协程重建；当前为单流下载（MediaStore 流式写已保证可靠与实时进度）。' '异常反馈请附：操作步骤 + 系统版本 + 现象描述。' > "$NOTES_FILE"
-          TAG="android-v4.0.0"
+          printf '%s\n' 'PanBoost v4.1.0——多线程分块下载 + 前台服务版。' '基于最新 Android 官方架构实践（Now in Android 范式对照优化）的三项核心升级：①多线程分块下载——旧 Python 引擎的核心竞争力完成原生重建：Range 探测 + 8 并发协程分块 + 块粒度断点续传（崩溃/取消后重跑自动跳过已完成块）+ 不支持 Range 的服务器自动降级单流；②前台服务规范化——Android 14+ 长时下载 Worker 强制要求 dataSync 前台服务：下载中常驻系统通知（显示进度）、退后台/锁屏不再被系统冻结（Kivy 时代前台服务杀进程闪退的正规替代方案）；③R8 full mode 压缩——release 构建开启代码压缩+资源收缩，APK 体积显著优化（debug 签名可直接安装）。' 'v4.0.0 原生重构（5 周计划）：Kotlin + Compose 全面重写，模块化架构（core/domain、core/data、core/network、feature/*），WebView 登录 + 原生网盘列表 + WorkManager 持久化下载队列 + MediaStore 零权限写公共 Download。' '权限说明：网络 + 前台服务 + 通知，仍然零存储权限（公共下载目录走系统正规通道）。' '异常反馈请附：操作步骤 + 系统版本 + 现象描述。' > "$NOTES_FILE"
+          TAG="android-v4.1.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" android/app/build/outputs/apk/debug/*.apk --clobber -R "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/debug/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.0.0（原生重构版）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.1.0（多线程分块+前台服务）" --latest --notes-file "$NOTES_FILE"
           fi

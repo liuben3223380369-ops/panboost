@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 第 2 周：无任何权限（MediaStore 写公共 Download 零权限） -->
+<!-- v4.1.0：FOREGROUND_SERVICE + dataSync（Android 14+ 长时下载
+     Worker 前台服务强制规范）+ POST_NOTIFICATIONS（13+ 通知权限，
+     前台服务通知可见性）——仍然零存储权限（MediaStore 正统路径） -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".PanBoostApplication"
@@ -19,8 +26,8 @@
             </intent-filter>
         </activity>
 
-        <!-- 第 2 周：禁用 WorkManager 默认初始化（App 经
-             Configuration.Provider 提供 HiltWorkerFactory） -->
+        <!-- 禁用 WorkManager 默认初始化（App 经 Configuration.Provider
+             提供 HiltWorkerFactory） -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
@@ -30,6 +37,13 @@
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
+
+        <!-- v4.1.0：WorkManager SystemForegroundService 声明
+             dataSync 类型（Android 14+ 前台服务必须声明类型） -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
     </application>
 
 </manifest>

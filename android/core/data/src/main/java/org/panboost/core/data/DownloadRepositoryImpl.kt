@@ -25,6 +25,9 @@ import javax.inject.Singleton
  * - 任务唯一性：uniqueWork 名 = "download-{id}" + ExistingWorkPolicy
  *   .KEEP —— 重复 enqueue 同 id 不重复排队（第 3 周验收项
  *   "无重复排队"在本层落实）；retry 用 REPLACE 顶替失败任务
+ * - v4.1.0：真实 URL 走 MultiThreadDownloadWorker（Range 分块
+ *   并发 + part 断点续传 + 前台服务 dataSync——Android 14+ 长时
+ *   Worker 规范，退后台不被冻结）
  * - 进度：WorkInfo.progress.bytes → DownloadTask.downloadedBytes
  *   （observeAll 的 Flow 由 WorkManager 状态流驱动，实时刷新）
  * - 持久化：WorkManager 自带队列持久化（进程死亡/重启后续跑），
@@ -75,13 +78,14 @@ class DownloadRepositoryImpl @Inject constructor(
         return request
     }
 
-    /** 真实下载（第 4 周链路：URL 直链 + Referer 流式写）。 */
+    /** 真实下载（v4.1.0：多线程分块 + 前台服务 dataSync）。 */
     private fun urlRequest(task: DownloadTask): OneTimeWorkRequest =
-        OneTimeWorkRequestBuilder<UrlDownloadWorker>()
+        OneTimeWorkRequestBuilder<MultiThreadDownloadWorker>()
             .setInputData(
                 workDataOf(
-                    UrlDownloadWorker.KEY_URL to task.url,
-                    UrlDownloadWorker.KEY_REFERER to "https://pan.quark.cn/",
+                    MultiThreadDownloadWorker.KEY_URL to task.url,
+                    MultiThreadDownloadWorker.KEY_REFERER to "https://pan.quark.cn/",
+                    MultiThreadDownloadWorker.KEY_THREADS to MultiThreadDownloadWorker.DEFAULT_THREADS,
                     MockDownloadWorker.KEY_FILE_NAME to task.fileName,
                     MockDownloadWorker.KEY_MIME to task.mimeType,
                 )
