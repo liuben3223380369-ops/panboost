@@ -21,7 +21,7 @@ class AndroidApplicationComposeConventionPlugin : Plugin<Project> {
                 .named("libs")
             pluginManager.apply("org.jetbrains.kotlin.plugin.compose")
 
-            extensions.configure<com.android.build.gradle.BaseAppModuleExtension> {
+            extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
                 buildFeatures {
                     compose = true
                 }

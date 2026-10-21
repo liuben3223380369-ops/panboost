@@ -20,7 +20,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             pluginManager.apply("com.android.application")
             pluginManager.apply("org.jetbrains.kotlin.android")
 
-            extensions.configure<com.android.build.gradle.BaseAppModuleExtension> {
+            extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
                 compileSdk = 35
                 defaultConfig {
                     minSdk = 26
