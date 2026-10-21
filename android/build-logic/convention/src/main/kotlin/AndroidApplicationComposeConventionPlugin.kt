@@ -34,6 +34,7 @@ class AndroidApplicationComposeConventionPlugin : Plugin<Project> {
                 add("implementation", libs.findLibrary("compose-ui").get())
                 add("implementation", libs.findLibrary("compose-foundation").get())
                 add("implementation", libs.findLibrary("compose-material3").get())
+                add("implementation", libs.findLibrary("compose-icons-extended").get())
                 add("implementation", libs.findLibrary("compose-ui-tooling-preview").get())
                 add("debugImplementation", libs.findLibrary("compose-ui-tooling").get())
             }
