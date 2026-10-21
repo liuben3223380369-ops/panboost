@@ -204,7 +204,7 @@ python panboost.py download "直链" --cookie "..." -o ~/storage/downloads/movie
 
 ### 方式二：图形界面 APP（APK）
 
-仓库 `mobile/` 内置 Kivy 图形壳（v3.2.7 原生网盘列表版——
+仓库 `mobile/` 内置 Kivy 图形壳（v3.2.8 原生网盘列表版——
 已登录夸克"我的网盘"不再走 WebView PC 网页（触摸拖拽被网页
 解释成选择、无原生滚动），改调网盘 Web API + 原生文件列表：
 文件夹轻点进入、文件轻点勾选、批量加速下载，滑动/轻点即

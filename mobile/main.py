@@ -151,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.2.7"
+SHELL_VERSION = "3.2.8"
 # v3.2.2：登录层架构回归主 Activity 内（LoginLayer addContentView
 # 全屏叠加 + PanMainActivity 重写 onBackPressed）——真机实锤
 # v3.2.0/v3.2.1 独立 LoginActivity 返回后 Kivy 主循环永不恢复
@@ -162,6 +162,11 @@ SHELL_VERSION = "3.2.7"
 # new Handler(Looper.getMainLooper()) 处 NPE 崩溃（部分 ROM
 # 从 SDL 线程取主 Looper 返回 null）；轮询/按钮恢复改
 # View.postDelayed 彻底去掉自建 Handler
+# v3.2.8：探测第三次误判根治——点开头隐藏探测文件，
+# MediaProvider 不索引不放行；真实媒体文件名（非隐藏+中文+
+# .apk）才是 scoped storage 的拦截对象。探测改用真实最难
+# 场景名 panboost_写入测试.apk，未授权时探测真实失败→自动存
+# 私有目录+首页授权卡片；授权后重探测切回公共目录
 # v3.2.7：根治"探测通过但引擎写入仍被拒（Errno 13）"——差异
 # 在打开模式：探测 open('wb') 豁免通过，引擎 os.open(O_RDWR)
 # 被 FUSE 拒（公共目录拒发读写打开）。引擎降级（O_RDWR→
@@ -174,7 +179,7 @@ SHELL_VERSION = "3.2.7"
 # （.write_test 探测误判：非媒体文件允许直写），申请
 # MANAGE_EXTERNAL_STORAGE + 首页一键授权卡片（跳系统设置，
 # 授权后公共目录直写+多线程 seek 全速），App 私有目录永久
-# 兜底下载永不失败；探测改 .probe.apk 真实反映可写性
+# 兜底下载永不失败；探测改真实媒体名反映可写性
 # v3.2.5：①根治"下载结束即闪退"——p4a PythonService.onDestroy
 # 的 Process.killProcess 杀同进程主 App（stop_keepalive→stopService
 # 触发，30s 探测超时+开销≈38 秒后闪退），移除 AndroidService 保活
@@ -331,23 +336,27 @@ _PUB_DL_OK = None
 
 
 def _probe_public_download():
-    """公共 Download 可写性探测（v3.2.7：对齐引擎真实写路径）。
+    """公共 Download 可写性探测（v3.2.8：非隐藏真实媒体文件名）。
 
-    两轮真机实锤的教训：
-    - v3.2.5：探测 open('wb') 通过，引擎 os.open(O_RDWR) 被拒
-      （Errno 13）——FUSE 对公共目录拒发读写打开；
-    - v3.2.6：探测改 .apk 后缀仍误判（差异不在后缀在打开模式）。
-    v3.2.7 引擎已降级（O_RDWR→O_WRONLY + flock/ftruncate
-    fail-open），探测必须模拟**降级后的最终路径**：
-    os.open(O_WRONLY|O_CREAT) + pwrite 超 EOF 写（文件扩展
-    语义）+ unlink——探测通过即引擎必能写。
+    三轮真机实锤的教训：
+    - v3.2.5：探测 open('wb') 通过，引擎 os.open(O_RDWR) 被拒；
+    - v3.2.6：探测改 .apk 后缀仍误判（差异在打开模式）；
+    - v3.2.7：打开模式对齐仍误判——探测文件是点开头隐藏名（
+      开头**隐藏文件**，Android MediaProvider 不索引隐藏文件、
+      不当媒体处理所以放行；真实文件"番茄畅听_xxx.apk"是正常
+      媒体名才被 scoped storage 拦（Errno 13）。
+    v3.2.8：探测文件用**非隐藏 + 中文 + 媒体后缀**的真实最难
+    场景名（panboost_写入测试.apk）+ 引擎降级后的最终路径
+    （O_WRONLY|O_CREAT + pwrite 超 EOF 扩展）——探测通过即
+    引擎必能写；未授权时探测真实失败 → 回退私有目录 + 首页
+    授权卡片引导（授权后 on_resume 重探测切回公共目录）。
     """
     from jnius import autoclass
     Env = autoclass("android.os.Environment")
     base = Env.getExternalStoragePublicDirectory(Env.DIRECTORY_DOWNLOADS)
     d = os.path.join(str(base.getAbsolutePath()), "PanBoost")
     os.makedirs(d, exist_ok=True)
-    probe = os.path.join(d, ".probe.apk")
+    probe = os.path.join(d, "panboost_写入测试.apk")
     fd = os.open(probe, os.O_WRONLY | os.O_CREAT, 0o644)
     try:
         os.pwrite(fd, b"ok", 1024)  # 超 EOF 写：文件扩展语义

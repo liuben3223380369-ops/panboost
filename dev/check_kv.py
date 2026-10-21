@@ -108,7 +108,14 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.2.7", "壳版本未升级到 3.2.7"
+    assert m.SHELL_VERSION == "3.2.8", "壳版本未升级到 3.2.8"
+
+    # v3.2.8 探测第三次误判根治：点开头隐藏探测文件，
+    # Android MediaProvider 不索引不放行；真实媒体文件名（非隐藏+
+    # 中文+.apk）才是 scoped storage 拦截对象（Errno 13 实锤）
+    assert "panboost_写入测试.apk" in msrc, \
+        "探测文件仍是隐藏名（MediaProvider 不索引会误判放行）"
+    assert '".probe.apk"' not in msrc, "旧隐藏探测文件名应已移除"
 
     # v3.2.7 根治"探测通过但引擎写入被拒"：差异在打开模式——
     # 探测 open('wb') 豁免，引擎 os.open(O_RDWR) 被 FUSE 拒
@@ -135,8 +142,8 @@ def main():
     # v3.2.5 真机"公共 Download 写入被拒（Errno 13）"根治门禁：
     # Android 11+ 上 targetSdk 33 无运行时权限可直写公共 Download
     # 媒体文件；.write_test 探测误判（非媒体文件允许直写）
-    assert ".probe.apk" in msrc, \
-        "公共目录探测未用媒体后缀（.write_test 误判根因）"
+    assert "panboost_写入测试.apk" in msrc, \
+        "公共目录探测未用非隐藏真实媒体名（误判根因）"
     assert "isExternalStorageManager" in msrc, "缺所有文件权限检查"
     assert "ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION" in msrc, \
         "缺一键跳系统设置授权"
