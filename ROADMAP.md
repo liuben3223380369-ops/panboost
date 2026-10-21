@@ -1,0 +1,56 @@
+# PanBoost 功能补齐路线（ROADMAP）
+
+> 定位纠偏：**换技术栈 ≠ 拆项目**。v3.2.8（Kivy 版）的全部功能面必须在
+> 原生栈（Kotlin + Compose）上等价或更强地回归。本表为逐项审计与
+> 回补计划；每项完成即划掉。
+
+## 审计基线
+
+- 旧版：v3.2.8（Kivy/p4a 终版，commit 46bae60）
+- 新版：v4.1.x（原生，模块化架构已就位）
+
+## 差距清单（按用户价值排序）
+
+### P0 —— 核心体验缺失（YunX 式主链路）
+
+| # | v3.2.8 功能 | v4.1.1 现状 | 回补方案 | 状态 |
+|---|---|---|---|---|
+| 1 | **分享链接解析**：粘贴夸克/123/蓝奏分享链接 → 文件列表勾选（全选/单选）→ 批量加速下载 | ❌ 完全缺失 | :feature:share 新屏 + :core:network 加 ShareApi（提取码输入/文件列表/直链批量） | 待做 |
+| 2 | **剪贴板识别**：复制分享链接回 App 自动填入 | ❌ | 回 App 时 ClipboardManager 比对 + Snackbar 确认填入 | 待做 |
+| 3 | **URL 直链高级下载**：粘贴任意直链（含 UA 回退/挑战 Cookie 自动通过） | ❌ | download 屏加"新建下载"输入框（线程数选择 auto/8/16/32） | 待做 |
+| 4 | **网盘多账号管理**：账号页账簿（已登录徽标/删除/重新登录） | ❌（只有单 Cookie 存取） | :feature:accounts + CookieStore 多网盘多账号结构 | 待做 |
+| 5 | **多网盘支持**（v3.2.8 = 18 家：百度/夸克/UC/阿里/天翼/移动/123/蓝奏/OneDrive 等） | ❌ 仅夸克 | pans 清单迁 Kotlin（数据驱动）；逐家接 Web API（夸克→UC→百度→123→蓝奏…） | 待做 |
+| 6 | **手动粘贴 Cookie 路径**（WebView 登录失败时的兜底） | ❌ | 账号页每网盘"手动粘贴 Cookie"入口 | 待做 |
+
+### P1 —— 可靠性与可观测性
+
+| # | 功能 | 现状 | 方案 | 状态 |
+|---|---|---|---|---|
+| 7 | **全局崩溃捕获**（crash-*.log 可取回） | ❌ | CrashReporter（UncaughtExceptionHandler → 外部私有目录） | ✅ v4.1.1 |
+| 8 | **应用日志屏**（app-*.log 按天轮转 + 环形缓冲） | ❌ | :core:logging（ Timber 式 + 文件轮转）+ :feature:logs | 待做 |
+| 9 | **下载历史**（永久记录/开关/失败重跑） | ❌ | Room（或 DataStore JSON）+ :feature:history | 待做 |
+| 10 | **实时速度显示**（KB/s / MB/s） | ❌ 只有字节 | Worker 进度含速率（滑动窗口） | 待做 |
+
+### P2 —— 引擎能力（Kivy 引擎 panboost.py 对标）
+
+| # | 功能 | 现状 | 方案 | 状态 |
+|---|---|---|---|---|
+| 11 | **auto 线程数**（实测测速自动选 16~1024） | 固定 8 | 分块探针测速（首 2 块耗时 → 线程数） | 待做 |
+| 12 | **拟人化请求头**（PersonaKit：UA/Referer 随机化防风控） | ❌ | OkHttp 拦截器加 persona 变体 | 待做 |
+| 13 | **挑战页 Cookie 自动通过**（浏览器验证挑战） | ❌ | 探测 403/挑战页 → WebView 静默过验证 → 重试 | 待做 |
+| 14 | **续传控制文件**（.pbctrl 崩溃一致性） | part 文件粒度 | 现方案够用（合并校验大小） | ✅ 等价 |
+
+### P3 —— 体验细节
+
+| # | 功能 | 现状 | 方案 | 状态 |
+|---|---|---|---|---|
+| 15 | 五屏导航（首页宫格/下载/账号/历史/日志） | 三屏 | 底部 NavigationBar（M3）+ 徽标 | 待做 |
+| 16 | 下载完成通知点击跳转 | 前台通知无内容 Intent | PendingIntent → MainActivity 深链 download 屏 | 待做 |
+
+## 架构不变量（回补时必须守住）
+
+- 零存储权限（MediaStore 正统路径）
+- 单 Activity + Compose Navigation
+- MVI 单一 UiState + Intent
+- 模块边界：feature → domain ← data/network
+- 每版 CI 门禁：R8 保真 + 零权限扫描 + assembleRelease

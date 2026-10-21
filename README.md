@@ -48,6 +48,16 @@ cd android
 
 要求：JDK 17、Gradle 8.13+、Android SDK 36。
 
+## 功能补齐路线
+
+v3.2（Kivy 版）的完整功能面正按 [ROADMAP.md](ROADMAP.md) 逐项
+回补（分享链接解析 / 多网盘 / 账号管理 / 下载历史 / 日志诊断等）。
+
+## 诊断
+
+崩溃报告位于 `/Android/data/org.panboost.app/files/crashes/crash-*.txt`
+（文件管理器可直接取回，反馈问题时请附上）。
+
 ## 隐私与安全边界
 
 - 登录走网盘官方页面（WebView），App 只采集用户自己的 Cookie

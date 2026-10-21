@@ -6,7 +6,7 @@ on:
     paths:
       - 'android/**'
       - '.github/workflows/android-native.yml'
-      - 'README.md'
+      - 'ROADMAP.md'
   workflow_dispatch:
 
 permissions:
@@ -24,33 +24,51 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # v4.0 第 5 周收官：AGP 8.11.1 + Gradle 8.13 + compileSdk/targetSdk 36
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
-      # 验收标准字面满足：先生成 ./gradlew（wrapper jar 为二进制，
-      # 本地环境无法生成，CI 生成后使用），再跑 assembleDebug
       - name: Generate Gradle wrapper
         run: cd android && gradle wrapper --gradle-version 8.13
 
-      - name: Assemble release APK（v4.1.0：R8 minify + shrink）
+      - name: Assemble release APK
         run: cd android && ./gradlew assembleRelease --stacktrace
 
-      - name: Smoke check APK（零权限验证：无 MANAGE_EXTERNAL_STORAGE）
+      - name: Smoke check APK
         run: |
           APK="android/app/build/outputs/apk/release/app-release.apk"
           test -f "$APK" || { echo "::error::app-release.apk 未生成"; exit 1; }
           ls -lh "$APK"
-          # 第 5 周验收：公共 Download 走 MediaStore 零权限——
-          # APK 内不得申请"所有文件访问"
-          AAPT="$HOME/.gradle/dependencies/android-sdk-cache-none/build-tools"
-          unzip -p "$APK" AndroidManifest.xml > /dev/null 2>&1 || true
           if strings "$APK" | grep -q "MANAGE_EXTERNAL_STORAGE"; then
             echo "::error::检测到 MANAGE_EXTERNAL_STORAGE（应走 MediaStore 零权限路径）"
             exit 1
           fi
           echo "零权限验证通过（无 MANAGE_EXTERNAL_STORAGE）"
-          # v4.1.0：R8 保真门禁——关键 URL/类必须在 dex 中（防过度裁剪产出残废 APK）
           python3 -c "import zipfile,sys; dex=zipfile.ZipFile('android/app/build/outputs/apk/release/app-release.apk').read('classes.dex'); keys=[b'drive-pc.quark.cn',b'pan.quark.cn',b'OkHttpClient',b'Lorg/panboost',b'MultiThreadDownloadWorker']; missing=[k.decode() for k in keys if k not in dex]; sys.exit('::error::R8 过度裁剪, 缺失: '+str(missing)) if missing else print('R8 保真校验通过')"
+
+      - name: Rename APK
+        run: |
+          cd android/app/build/outputs/apk/release
+          for f in *.apk; do mv "$f" panboost-4.1.1-android.apk; done
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: panboost-native-release
+          path: android/app/build/outputs/apk/release/*.apk
+
+      - name: Publish to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_FILE: release-notes.txt
+        run: |
+          printf '%s\n' 'PanBoost v4.1.1——闪退根治版。' 'v4.1.0 的 Release 资产曾被 R8 过度裁剪（关键类缺失导致启动即闪退）且发布步骤意外缺失——本版双重修复：保守混淆规则（App 全包保真）+ CI 发布链完整性（重命名/上传/发布三步回归）+ R8 保真门禁（dex 内必须含 API 端点与关键类，防残废 APK 再次流出）。' '新增：全局崩溃捕获（未捕获异常写入 crash-*.txt，可用文件管理器取回诊断——v3.2 诊断能力回魂第一步）。' '架构能力（v4.1.0）：多线程 Range 分块 + 断点续传 + Android 14+ dataSync 前台服务。' '功能差距审计与补齐计划见仓库 ROADMAP.md（v3.2.8 的 18 网盘/分享链接解析/账号管理/下载历史等将逐版本回补）。' '权限：网络 + 前台服务 + 通知，零存储权限。' '异常反馈请附：/Android/data/org.panboost.app/files/crash-*.txt + 操作步骤 + 系统版本。' > "$NOTES_FILE"
+          TAG="android-v4.1.1"
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.1.1（闪退根治）" --latest --notes-file "$NOTES_FILE"
+          fi
+          # 删除已知的 v4.1.0 残废资产（防误装闪退）
+          gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

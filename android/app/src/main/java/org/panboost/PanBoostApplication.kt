@@ -20,6 +20,15 @@ class PanBoostApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
 
+    // v4.1.1：全局崩溃捕获（crash-*.txt 可取回诊断——v3.2 能力回魂）
+    @Inject
+    lateinit var crashReporter: org.panboost.core.data.CrashReporter
+
+    override fun onCreate() {
+        super.onCreate()
+        crashReporter.install()
+    }
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
