@@ -70,12 +70,6 @@ object NetworkModule {
     /** 直链下载请求体工厂（JSON {"fids":[...]}）。 */
     @Provides
     @Singleton
-    fun provideFidsBodyFactory(): FidsBodyFactory = FidsBodyFactory()
-}
-
-/** POST /file/download 的请求体构造（fids JSON——单处定义）。 */
-class FidsBodyFactory {
-    fun create(fid: String): RequestBody =
-        """{"fids":["$fid"]}"""
-            .toRequestBody("application/json".toMediaType())
+    fun provideFidsBodyFactory(): org.panboost.core.network.FidsBodyFactory =
+        org.panboost.core.network.FidsBodyFactory()
 }
