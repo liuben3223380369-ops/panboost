@@ -33,8 +33,8 @@ class UrlDownloadWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val url = inputData.getString(KEY_URL) ?: return Result.failure()
-        val fileName = inputData.getString(KEY_FILE_NAME) ?: "panboost.bin"
-        val mime = inputData.getString(KEY_MIME) ?: "application/octet-stream"
+        val fileName = inputData.getString(MockDownloadWorker.KEY_FILE_NAME) ?: "panboost.bin"
+        val mime = inputData.getString(MockDownloadWorker.KEY_MIME) ?: "application/octet-stream"
         val referer = inputData.getString(KEY_REFERER) ?: QuarkApi.REFERER
 
         // 下载直链走独立客户端（同头策略；API 客户端的 Cookie 对

@@ -59,6 +59,7 @@ fun LoginScreen(
     )
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun LoginScreenContent(
@@ -91,8 +92,9 @@ internal fun LoginScreenContent(
                         settings.loadWithOverviewMode = true
                         CookieManager.getInstance().apply {
                             setAcceptCookie(true)
-                            setAcceptThirdPartyCookies(this@apply, true)
                         }
+                        CookieManager.getInstance()
+                            .setAcceptThirdPartyCookies(this, true)
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
