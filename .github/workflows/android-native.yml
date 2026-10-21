@@ -50,7 +50,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-4.1.1-android.apk; done
+          for f in *.apk; do mv "$f" panboost-4.2.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -63,12 +63,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v4.1.1——闪退根治版。' 'v4.1.0 的 Release 资产曾被 R8 过度裁剪（关键类缺失导致启动即闪退）且发布步骤意外缺失——本版双重修复：保守混淆规则（App 全包保真）+ CI 发布链完整性（重命名/上传/发布三步回归）+ R8 保真门禁（dex 内必须含 API 端点与关键类，防残废 APK 再次流出）。' '新增：全局崩溃捕获（未捕获异常写入 crash-*.txt，可用文件管理器取回诊断——v3.2 诊断能力回魂第一步）。' '架构能力（v4.1.0）：多线程 Range 分块 + 断点续传 + Android 14+ dataSync 前台服务。' '功能差距审计与补齐计划见仓库 ROADMAP.md（v3.2.8 的 18 网盘/分享链接解析/账号管理/下载历史等将逐版本回补）。' '权限：网络 + 前台服务 + 通知，零存储权限。' '异常反馈请附：/Android/data/org.panboost.app/files/crash-*.txt + 操作步骤 + 系统版本。' > "$NOTES_FILE"
-          TAG="android-v4.1.1"
+          printf '%s\n' 'PanBoost v4.2.0——分享链接下载版（P0 核心体验回补）。' 'YunX 式核心链路原生回归（ROADMAP P0 前两项完成）：①分享链接下载——粘贴夸克分享链接（提取码可写在链接里或单独填）→ 解析出文件列表 → 勾选（单选/全选）→ 批量加速下载（8 线程 Range 分块 + 断点续传 + 前台服务通知）；②剪贴板识别——复制分享链接回到 App 自动填入（不覆盖已输入内容）。' '界面升级：底部三 Tab 导航（分享/网盘/下载，M3 NavigationBar）。' '既有能力保留：WebView 登录、我的网盘浏览下载、下载进度/取消/重试/防重复排队、全局崩溃捕获（crash-*.txt）。' '功能差距审计与后续回补（账号管理/多网盘/下载历史/日志屏等 14 项）见仓库 ROADMAP.md。' '权限：网络 + 前台服务 + 通知，零存储权限。' '异常反馈请附：/Android/data/org.panboost.app/files/crashes/crash-*.txt + 操作步骤 + 系统版本。' > "$NOTES_FILE"
+          TAG="android-v4.2.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.1.1（闪退根治）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.2.0（分享链接下载）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

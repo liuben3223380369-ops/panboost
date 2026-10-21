@@ -5,7 +5,9 @@ import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import org.panboost.core.domain.DriveRepository
+import org.panboost.core.domain.ShareRepository
 import org.panboost.core.network.QuarkDriveRepository
+import org.panboost.core.network.QuarkShareRepository
 import javax.inject.Singleton
 
 /** 仓库绑定（第 4 周）：接口→夸克实现。 */
@@ -18,4 +20,11 @@ abstract class RepositoryModule {
     abstract fun bindDriveRepository(
         impl: QuarkDriveRepository,
     ): DriveRepository
+
+    // v4.2.0：分享链接解析仓库
+    @Binds
+    @Singleton
+    abstract fun bindShareRepository(
+        impl: QuarkShareRepository,
+    ): ShareRepository
 }

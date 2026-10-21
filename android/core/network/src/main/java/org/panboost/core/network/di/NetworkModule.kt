@@ -67,6 +67,12 @@ object NetworkModule {
     fun provideQuarkApi(retrofit: Retrofit): QuarkApi =
         retrofit.create(QuarkApi::class.java)
 
+    // v4.2.0：分享链接解析 API（同一 Retrofit/OkHttp/拦截器链）
+    @Provides
+    @Singleton
+    fun provideQuarkShareApi(retrofit: Retrofit): org.panboost.core.network.QuarkShareApi =
+        retrofit.create(org.panboost.core.network.QuarkShareApi::class.java)
+
     /** 直链下载请求体工厂（JSON {"fids":[...]}）。 */
     @Provides
     @Singleton
