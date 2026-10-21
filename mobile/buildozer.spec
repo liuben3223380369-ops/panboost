@@ -6,7 +6,7 @@ package.domain = org.panboost
 source.dir = .
 source.include_exts = py,ttf
 
-version = 3.2.5
+version = 3.2.6
 
 requirements = python3,kivy,certifi,pyjnius
 
@@ -50,7 +50,10 @@ android.archs = arm64-v8a
 
 # INTERNET 网络；WAKE_LOCK 锁屏保活；FOREGROUND_SERVICE+POST_NOTIFICATIONS
 # 前台服务常驻通知（Android 12+ 后台冻结防护，下载不断流）
-android.permissions = INTERNET,WAKE_LOCK,FOREGROUND_SERVICE,POST_NOTIFICATIONS
+# v3.2.6：MANAGE_EXTERNAL_STORAGE——公共 Download 媒体文件直写
+#（Android 11+ scoped storage 拦截 .apk 等媒体文件路径写；
+# 用户在系统设置授权"所有文件访问"后 download_dir 自动切公共目录）
+android.permissions = INTERNET,WAKE_LOCK,FOREGROUND_SERVICE,POST_NOTIFICATIONS,MANAGE_EXTERNAL_STORAGE
 android.allow_backup = True
 
 # 下载前台服务：保活心跳（下载线程在主进程，引擎实时落盘）

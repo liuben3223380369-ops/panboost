@@ -386,8 +386,17 @@ def main():
     check("壳-百度改用PC统一登录页",
           mobile_main.PAN_BY_KEY["baidu"]["login"]
           == "https://passport.baidu.com/v2/?login")
-    check("壳-壳版本3.2.5",
-          mobile_main.SHELL_VERSION == "3.2.5", mobile_main.SHELL_VERSION)
+    check("壳-壳版本3.2.6",
+          mobile_main.SHELL_VERSION == "3.2.6", mobile_main.SHELL_VERSION)
+    msrc = Path(mobile_main.__file__).read_text(encoding="utf-8")
+    check("壳-公共Download权限链（v3.2.6 根治 Errno 13）",
+          ".probe.apk" in msrc
+          and "isExternalStorageManager" in msrc
+          and "ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION" in msrc
+          and "def reset_download_dir_probe" in msrc
+          and "id: perm_hint" in mobile_main.KV
+          and "on_perm_tap" in msrc,
+          "媒体后缀探测+所有文件权限+一键授权卡片+重探测")
     msrc = Path(mobile_main.__file__).read_text(encoding="utf-8")
     check("壳-闪退雷源根除（v3.2.5 无 AndroidService）",
           "from android import AndroidService" not in msrc

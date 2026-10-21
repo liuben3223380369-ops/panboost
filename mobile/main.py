@@ -151,7 +151,7 @@ from theme import (BG, CARD, CARD_DOWN, PRIMARY, PRIMARY_DARK,  # noqa: E402
 HISTORY_FILE = pb.CONFIG_DIR / "history.json"
 ACCOUNTS_FILE = pb.CONFIG_DIR / "accounts.json"
 
-SHELL_VERSION = "3.2.5"
+SHELL_VERSION = "3.2.6"
 # v3.2.2：登录层架构回归主 Activity 内（LoginLayer addContentView
 # 全屏叠加 + PanMainActivity 重写 onBackPressed）——真机实锤
 # v3.2.0/v3.2.1 独立 LoginActivity 返回后 Kivy 主循环永不恢复
@@ -162,6 +162,12 @@ SHELL_VERSION = "3.2.5"
 # new Handler(Looper.getMainLooper()) 处 NPE 崩溃（部分 ROM
 # 从 SDL 线程取主 Looper 返回 null）；轮询/按钮恢复改
 # View.postDelayed 彻底去掉自建 Handler
+# v3.2.6：①根治"公共 Download 写入被拒"——Android 11+ 上
+# targetSdk 33 无任何运行时权限可直写公共 Download 媒体文件
+# （.write_test 探测误判：非媒体文件允许直写），申请
+# MANAGE_EXTERNAL_STORAGE + 首页一键授权卡片（跳系统设置，
+# 授权后公共目录直写+多线程 seek 全速），App 私有目录永久
+# 兜底下载永不失败；探测改 .probe.apk 真实反映可写性
 # v3.2.5：①根治"下载结束即闪退"——p4a PythonService.onDestroy
 # 的 Process.killProcess 杀同进程主 App（stop_keepalive→stopService
 # 触发，30s 探测超时+开销≈38 秒后闪退），移除 AndroidService 保活
@@ -317,33 +323,88 @@ def external_files_dir():
 _PUB_DL_OK = None
 
 
+def _probe_public_download():
+    """公共 Download 可写性探测（v3.2.6 修正：必须用媒体后缀）。
+
+    真机实锤：Android 11+ scoped storage 允许 App 在公共 Download
+    里用文件路径直接创建**非媒体文件**（.txt/.write_test——v3.0.0
+    的探测因此误判通过），但**媒体文件**（.apk/.mp4 等）必须走
+    MediaStore 或"所有文件访问权限"——引擎打开 .apk 即
+    PermissionError（真机日志 Errno 13）。探测文件必须用 .apk
+    后缀，探测结果才与真实下载一致。
+    """
+    from jnius import autoclass
+    Env = autoclass("android.os.Environment")
+    base = Env.getExternalStoragePublicDirectory(Env.DIRECTORY_DOWNLOADS)
+    d = os.path.join(str(base.getAbsolutePath()), "PanBoost")
+    os.makedirs(d, exist_ok=True)
+    probe = os.path.join(d, ".probe.apk")
+    with open(probe, "wb") as f:
+        f.write(b"ok")
+    os.remove(probe)
+    return d
+
+
 def download_dir():
     """下载输出目录（v3.0.0：优先公共 Download/PanBoost）。
 
-    公共目录文件管理器直接可见（用户诉求"下载的文件找不到"）；
-    Android 11+ 应用可创建并写自己在公共 Downloads 下的文件
-    （scoped storage 豁免，无需权限）。写测试失败（Android 10
-    及以下/特殊 ROM）回退 App 外部私有目录。测试结果缓存，
-    避免每次下载重复探测。
+    公共目录文件管理器直接可见（用户诉求"下载的文件找不到"）。
+    v3.2.6：探测用媒体后缀（.probe.apk）真实反映可写性；未获
+    "所有文件访问权限"时 Android 11+ 上媒体文件被 scoped storage
+    拦截 → 回退 App 外部私有目录（必可写，下载永不失败）。
+    授权后 reset_download_dir_probe() 重探测自动切回公共目录。
     """
     global _PUB_DL_OK
     if _PUB_DL_OK is not None:
         return _PUB_DL_OK
     try:
-        from jnius import autoclass
-        Env = autoclass("android.os.Environment")
-        base = Env.getExternalStoragePublicDirectory(
-            Env.DIRECTORY_DOWNLOADS)
-        d = os.path.join(str(base.getAbsolutePath()), "PanBoost")
-        os.makedirs(d, exist_ok=True)
-        probe = os.path.join(d, ".write_test")
-        with open(probe, "w", encoding="utf-8") as f:
-            f.write("ok")
-        os.remove(probe)
-        _PUB_DL_OK = d
+        _PUB_DL_OK = _probe_public_download()
     except Exception:
         _PUB_DL_OK = external_files_dir()
     return _PUB_DL_OK
+
+
+def reset_download_dir_probe():
+    """权限变化后重置公共目录探测缓存（v3.2.6）。"""
+    global _PUB_DL_OK
+    _PUB_DL_OK = None
+
+
+def all_files_granted():
+    """"所有文件访问"权限（API 30+，v3.2.6）。
+
+    授权后公共 Download 媒体文件可直接路径写（512 线程 seek
+    全速）。非 Android / API 29- / 异常时 False。
+    """
+    try:
+        from jnius import autoclass
+        Build = autoclass("android.os.Build$VERSION")
+        if (Build.SDK_INT or 0) < 30:
+            return False
+        Env = autoclass("android.os.Environment")
+        return bool(Env.isExternalStorageManager())
+    except Exception:
+        return False
+
+
+def request_all_files():
+    """跳系统"所有文件权限"设置页（API 30+）。返回是否已发起。"""
+    try:
+        from jnius import autoclass
+        Build = autoclass("android.os.Build$VERSION")
+        if (Build.SDK_INT or 0) < 30:
+            return False
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Settings = autoclass("android.provider.Settings")
+        Uri = autoclass("android.net.Uri")
+        Intent = autoclass("android.content.Intent")
+        i = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+        i.setData(Uri.parse("package:"
+                            + PythonActivity.mActivity.getPackageName()))
+        PythonActivity.mActivity.startActivity(i)
+        return True
+    except Exception:
+        return False
 
 
 def _dump_crash(tag):
@@ -739,6 +800,17 @@ BoxLayout:
             height: dp(48)
             color: 1, 1, 1, 1
             on_release: app.go('download')
+
+        CardButton:
+            id: perm_hint
+            text: '授予所有文件权限——下载保存到公共 Download'
+            font_size: sp(12)
+            bg: 0.988, 0.831, 0.251, 0.95
+            bg_down: 0.906, 0.749, 0.204, 0.95
+            size_hint_y: None
+            height: dp(0)
+            color: 0.235, 0.161, 0.039, 1
+            on_release: app.on_perm_tap()
 
         Label:
             id: home_status
@@ -1237,6 +1309,8 @@ class PanBoostApp(App):
             self.refresh_history()
         elif name == "logs":
             self.refresh_logs()
+        elif name == "home":
+            self.refresh_perm_hint()
 
     def _cur(self):
         """当前屏名（v2.0.0 root 为 BoxLayout，ScreenManager 在 ids.sm）。"""
@@ -2134,6 +2208,30 @@ class PanBoostApp(App):
         applog.info("download", "网盘批量下载结束 %d/%d"
                     % (done, total))
 
+    def refresh_perm_hint(self):
+        """首页"所有文件权限"卡片刷新（v3.2.6）。
+
+        未授权（Android 11+ 公共 Download 媒体文件写被 scoped
+        storage 拦截）→ 显示黄色卡片引导一键授权；已授权/非
+        Android → 隐藏。授权后下载直存公共 Download（文件管理
+        器直接可见 + 多线程 seek 全速）。
+        """
+        try:
+            need = IS_ANDROID and not all_files_granted()
+            hint = self._scr("home").ids.perm_hint
+            hint.height = dp(44) if need else dp(0)
+        except Exception:
+            pass
+
+    def on_perm_tap(self):
+        """点击授权卡片：跳系统设置页（API 30+）。"""
+        if not request_all_files():
+            self._home_status(
+                "此系统不支持该权限，文件将存应用目录（同样可下载）")
+        else:
+            self._home_status(
+                "请在系统设置里打开「所有文件访问权限」后返回")
+
     def _on_resume(self, *args):
         """剪贴板识别（v3.0.0）+ 返回黑屏兜底（v3.2.1 防线③）。
 
@@ -2143,6 +2241,15 @@ class PanBoostApp(App):
         下个 tick 强制重绘（Kivy 社区验证的标准黑屏修复）。"""
         try:
             Window.canvas.ask_update()
+        except Exception:
+            pass
+        try:
+            if (all_files_granted()
+                    and not getattr(self, "_perm_nudged", False)):
+                self._perm_nudged = True
+                reset_download_dir_probe()
+                self.refresh_perm_hint()
+                self._home_status("已授权：下载将保存到公共 Download")
         except Exception:
             pass
         try:

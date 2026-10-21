@@ -108,7 +108,24 @@ def main():
     assert "on_keyboard" in msrc, "返回键未绑定 on_keyboard"
     assert "key != 27" in msrc, "未识别 Android 返回键 keycode 27"
     assert "weblogin.request_back()" in msrc, "返回键未接入登录层处理"
-    assert m.SHELL_VERSION == "3.2.5", "壳版本未升级到 3.2.5"
+    assert m.SHELL_VERSION == "3.2.6", "壳版本未升级到 3.2.6"
+
+    # v3.2.5 真机"公共 Download 写入被拒（Errno 13）"根治门禁：
+    # Android 11+ 上 targetSdk 33 无运行时权限可直写公共 Download
+    # 媒体文件；.write_test 探测误判（非媒体文件允许直写）
+    assert ".probe.apk" in msrc, \
+        "公共目录探测未用媒体后缀（.write_test 误判根因）"
+    assert "isExternalStorageManager" in msrc, "缺所有文件权限检查"
+    assert "ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION" in msrc, \
+        "缺一键跳系统设置授权"
+    assert "def reset_download_dir_probe" in msrc, \
+        "缺授权后重探测（权限生效需重置缓存）"
+    assert "id: perm_hint" in m.KV, "首页缺授权引导卡片"
+    assert "on_perm_tap" in msrc, "卡片未绑定授权点击"
+    spec_v326 = Path(ROOT).joinpath("mobile", "buildozer.spec").read_text(
+        encoding="utf-8")
+    assert "MANAGE_EXTERNAL_STORAGE" in spec_v326, \
+        "spec 未申请所有文件权限"
 
     # v3.2.5 真机"下载结束即闪退"根治门禁：p4a PythonService
     # onDestroy() 有 Process.killProcess(myPid)——服务与主 App 同
