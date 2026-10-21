@@ -53,6 +53,6 @@ interface QuarkApi {
         const val COOKIE_DOMAIN = "https://pan.quark.cn"
 
         /** 登录成功特征键（命中即认为已登录）。 */
-        const val AUTH_COOKIE_KEYS = listOf("__pus", "__puus")
+        val AUTH_COOKIE_KEYS = listOf("__pus", "__puus")
     }
 }
