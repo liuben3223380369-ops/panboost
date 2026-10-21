@@ -6,10 +6,11 @@ on:
     paths:
       - 'android/**'
       - '.github/workflows/android-native.yml'
+      - 'README.md'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   assemble:
@@ -23,8 +24,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # 原生重构（v4.0 计划）：Gradle 8.13 + AGP 8.9.1 + Kotlin 2.1.20
-      # setup-gradle 自带依赖缓存（首跑下载依赖，后续命中缓存）
+      # v4.0 第 5 周收官：AGP 8.11.1 + Gradle 8.13 + compileSdk/targetSdk 36
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -38,14 +38,41 @@ jobs:
       - name: Assemble debug APK
         run: cd android && ./gradlew assembleDebug --stacktrace
 
-      - name: Smoke check APK
+      - name: Smoke check APK（零权限验证：无 MANAGE_EXTERNAL_STORAGE）
         run: |
           APK="android/app/build/outputs/apk/debug/app-debug.apk"
           test -f "$APK" || { echo "::error::app-debug.apk 未生成"; exit 1; }
           ls -lh "$APK"
+          # 第 5 周验收：公共 Download 走 MediaStore 零权限——
+          # APK 内不得申请"所有文件访问"
+          AAPT="$HOME/.gradle/dependencies/android-sdk-cache-none/build-tools"
+          unzip -p "$APK" AndroidManifest.xml > /dev/null 2>&1 || true
+          if strings "$APK" | grep -q "MANAGE_EXTERNAL_STORAGE"; then
+            echo "::error::检测到 MANAGE_EXTERNAL_STORAGE（应走 MediaStore 零权限路径）"
+            exit 1
+          fi
+          echo "零权限验证通过（无 MANAGE_EXTERNAL_STORAGE）"
+
+      - name: Rename APK
+        run: |
+          cd android/app/build/outputs/apk/debug
+          for f in *.apk; do mv "$f" panboost-4.0.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: panboost-native-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      - name: Publish to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_FILE: release-notes.txt
+        run: |
+          printf '%s\n' 'PanBoost v4.0.0——原生重构版（Kotlin + Compose）。' '按 5 周迁移计划完成的全面重写：告别 Python/Kivy 桥接层的四类结构性问题（WebView 黑屏、前台服务杀进程、公共目录直写权限、跨语言回调失效）。' 'v4.0.0 收官（第 5 周）：①清理全部旧 Kivy/p4a 代码（mobile/ 及配套校验链），仓库纯原生模块化（NIA 风格：core/domain、core/data、core/network、feature/login、feature/home、feature/download + Convention Plugins + Version Catalog）②targetSdk/compileSdk 36（Android 16）③零存储权限验证——公共 Download 写入走 MediaStore 正统路径，不申请"所有文件访问"（与旧版 MANAGE_EXTERNAL_STORAGE 方案的根本区别），文件管理器直接可见。' '完整功能链：WebView 官方登录（自动采集 Cookie）→ 原生网盘文件列表（公开 Web API + 用户 Cookie，面包屑导航）→ 点文件取直链 → WorkManager 持久化下载队列（进程死亡续跑）→ 实时进度/取消/重试/防重复排队 → Download/PanBoost。' '第 1-4 周里程碑：模块骨架与 Hilt 落地（assembleDebug 绿）→ MediaStore 写入 + WorkManager（模拟下载验收）→ MVI 下载屏（进度实时刷新验收）→ Retrofit 网络层 + 完整登录浏览下载链路（验收）。' '已知边界：多线程分块下载（旧引擎核心能力）计划后续版本以 Range 分块 + 并发协程重建；当前为单流下载（MediaStore 流式写已保证可靠与实时进度）。' '异常反馈请附：操作步骤 + 系统版本 + 现象描述。' > "$NOTES_FILE"
+          TAG="android-v4.0.0"
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" android/app/build/outputs/apk/debug/*.apk --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" android/app/build/outputs/apk/debug/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.0.0（原生重构版）" --latest --notes-file "$NOTES_FILE"
+          fi

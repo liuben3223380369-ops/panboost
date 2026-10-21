@@ -1,7 +1,7 @@
 # PanBoost Android 原生重构（v4.0 计划，第 1 周骨架）
 # 版本选型原则：保守稳定组合，KSP 与 Kotlin 严格配对
 [versions]
-agp = "8.9.1"
+agp = "8.11.1"
 kotlin = "2.1.20"
 ksp = "2.1.20-1.0.32"
 hilt = "2.56.2"

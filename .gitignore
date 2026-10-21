@@ -1,20 +1,10 @@
-__pycache__/
-*.pyc
-*.pbctrl
-*.pbpart
-*.pblock
-.antifraud*
-buildozer/
-mobile/bin/
-mobile/.buildozer/
-*.apk
-.idea/
-.vscode/
-
-# Android 原生重构（v4.0 计划）
+# Android 原生（v4.0）
 android/.gradle/
 android/build/
 android/**/build/
 android/local.properties
 android/.kotlin/
 android/gradle/wrapper/gradle-wrapper.jar
+.gradle/
+.idea/
+.vscode/

@@ -10,7 +10,8 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
 /**
  * application 模块通用约定（第 1 周）。
  *
- * compileSdk 35 / targetSdk 35（第 5 周按计划升 36 并移除
+ * compileSdk 36 / targetSdk 36（第 5 周收官：Android 16；公共
+ * Download 写入走 MediaStore 零权限正统路径——无需也不申请
  * MANAGE_EXTERNAL_STORAGE）；minSdk 26 覆盖 97%+ 设备且
  * WorkManager / MediaStore 无兼容负担。Java/Kotlin 统一 17。
  */
@@ -21,10 +22,10 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             pluginManager.apply("org.jetbrains.kotlin.android")
 
             extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
-                compileSdk = 35
+                compileSdk = 36
                 defaultConfig {
                     minSdk = 26
-                    targetSdk = 35
+                    targetSdk = 36
                     testInstrumentationRunner =
                         "androidx.test.runner.AndroidJUnitRunner"
                 }
