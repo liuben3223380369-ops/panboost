@@ -81,6 +81,7 @@ fun ShareScreen(
 
 private const val QuarkShareUrlPattern = "quark\\.cn/s/[A-Za-z0-9]+"
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 internal fun ShareScreenContent(
     uiState: ShareUiState,
