@@ -63,22 +63,41 @@ class QuarkDriveRepository @Inject constructor(
         }
         val root = JSONObject(body)
         checkCode(root)
-        val data = root.opt("data")
-        // YunX 实锤：data 为数组 [fid, name, download_url, size]
-        val url = when (data) {
-            is org.json.JSONArray -> data.optString(2)
-            is JSONObject -> data.optString("download_url")
-            else -> ""
-        }
+        // v5.3.1：真机日志实锤 download 响应形态——data 为数组，
+        // 元素是对象 {fid, file_name, pdir_fid, download_url?, ...}；
+        // v3.2.8 时代的裸数组 [fid, name, url, size] 形态已过时。
+        // 旧解析 data.optString(2) 取裸数组下标 → 永远为空（列表
+        // 200 成功却报"解析失败"的唯一根因）。
+        val url = extractDownloadUrl(root.opt("data"))
         if (!url.startsWith("http")) {
-            // v5.2.0：code:0 却无 download_url——夸克对失效 Cookie 的
-            // "假成功"形态（真机实锤）；完整响应记日志供诊断
-            appLog.error("drive", "直链响应无 download_url：${body.take(200)}")
+            // code:0 却无 download_url——两种可能：Cookie 失效假成功
+            // 或该文件无下载权限；完整响应记日志供诊断
+            appLog.error("drive", "直链响应无 download_url：${body.take(300)}")
             throw IllegalStateException(
-                "直链解析失败（登录态已失效——请到「账号」页删除夸克后重新登录）"
+                "该文件未能取得直链（可能无下载权限或登录态受限）——详见日志"
             )
         }
         return url
+    }
+
+    /** 三形态 download_url 提取（v5.3.1 真机日志实锤修正）。 */
+    private fun extractDownloadUrl(data: Any?): String {
+        return when (data) {
+            // 当前形态：数组包对象 [{fid, file_name, download_url, ...}]
+            is org.json.JSONArray -> {
+                for (i in 0 until data.length()) {
+                    val o = data.optJSONObject(i) ?: continue
+                    val u = o.optString("download_url")
+                    if (u.startsWith("http")) return u
+                }
+                // 兼容旧形态：裸数组 [fid, name, url, size]
+                data.optString(2).takeIf { it.startsWith("http") } ?: ""
+            }
+            // 单对象形态
+            is JSONObject -> data.optString("download_url")
+                .takeIf { it.startsWith("http") } ?: ""
+            else -> ""
+        }
     }
 
     /** HTTP 层错误映射（v5.1.0：401 = Cookie 过期引导重登）。 */
