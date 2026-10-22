@@ -33,6 +33,12 @@ jobs:
       - name: Generate Gradle wrapper
         run: cd android && gradle wrapper --gradle-version 8.13
 
+      - name: Lint (v5.4.0：静态检查基线——NIA 对照查缺)
+        run: cd android && ./gradlew lintRelease || true
+
+      - name: Unit tests (v5.4.0：测试基线)
+        run: cd android && ./gradlew testReleaseUnitTest || true
+
       - name: Assemble release APK
         run: cd android && ./gradlew assembleRelease --stacktrace
 
@@ -42,7 +48,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.3.3-android.apk; done
+          for f in *.apk; do mv "$f" panboost-5.4.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -55,12 +61,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.3.3——直链 Cookie + 重试根治。' 'v5.3.2 日志实锤两 bug：①单流 HTTP 412——夸克直链校验 __puus Cookie 签名，此前直链请求只带 Referer/UA 没带 Cookie（v3.2.8 引擎本就带 Cookie）；②点击重试变成模拟下载（panboost.bin 完成）——retry() 还是早期验证代码，用 MockDownloadWorker 重建任务。修复：①Worker 注入账号仓库，直链全链路（HEAD 探测/GET Range 探测/分块下载/单流降级）统一携带实时 Cookie；②retry(task) 重签名传完整原任务（原 URL/文件名/线程数）——重试=原任务重跑，mock:// 前缀仍走模拟（验证路径保留）。' '既有：Cookie 实时罐/三形态直链解析/CDN 双重探测降级/512~1024 线程/防风控。' > "$NOTES_FILE"
-          TAG="android-v5.3.3"
+          printf '%s\n' 'PanBoost v5.4.0——架构查缺补漏版（联网对照 Now in Android 最新实践）。' '研究成果与落地：①新增 :core:ui 共享层——fmtSize 等格式化函数此前在 home/history/share 三屏各复制一份（NIA core/ui 单一定义点模式），现统一收编并新增 fmtSpeed/状态语义色；②CI 加 lintRelease + testReleaseUnitTest 步骤（对照 NIA：静态检查与单元测试基线我们从未建立——首版先跑通不阻塞发布，后续逐步收紧为门禁）；③AndroidLibraryConventionPlugin 收编 NIA 细节：testOptions.targetSdk=36 对齐 + minSdk 26 保持（NIA 是 24，我们 26 因 WorkManager/MediaStore）。' '既有：直链 Cookie/三形态解析/CDN 双重探测/512~1024 线程/防风控/三网盘分享/历史/日志。' > "$NOTES_FILE"
+          TAG="android-v5.4.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.3.3（直链Cookie+重试根治）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.4.0（架构查缺补漏）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

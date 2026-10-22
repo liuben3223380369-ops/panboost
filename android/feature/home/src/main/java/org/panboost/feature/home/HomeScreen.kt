@@ -1,5 +1,7 @@
 package org.panboost.feature.home
 
+import org.panboost.core.ui.fmtSize
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -283,12 +285,6 @@ private fun FileRow(file: DriveFile, onClick: () -> Unit) {
     }
 }
 
-internal fun fmtSize(bytes: Long): String = when {
-    bytes >= 1024L * 1024 * 1024 -> "%.1fGB".format(bytes / 1024f / 1024f / 1024f)
-    bytes >= 1024L * 1024 -> "%.1fMB".format(bytes / 1024f / 1024f)
-    bytes >= 1024L -> "%dKB".format(bytes / 1024)
-    else -> "${bytes}B"
-}
 
 @Preview(showBackground = true)
 @Composable

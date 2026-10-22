@@ -18,12 +18,14 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             pluginManager.apply("org.jetbrains.kotlin.android")
 
             extensions.configure<com.android.build.api.dsl.LibraryExtension> {
-                compileSdk = 35
+                compileSdk = 36
                 defaultConfig {
                     minSdk = 26
                     testInstrumentationRunner =
                         "androidx.test.runner.AndroidJUnitRunner"
                 }
+                // v5.4.0：NIA 对照——测试选项对齐目标 SDK
+                testOptions.targetSdk = 36
                 compileOptions {
                     sourceCompatibility = JavaVersion.VERSION_17
                     targetCompatibility = JavaVersion.VERSION_17

@@ -1,5 +1,7 @@
 package org.panboost.feature.share
 
+import org.panboost.core.ui.fmtSize
+
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
@@ -209,12 +211,6 @@ private fun FileRow(
     }
 }
 
-internal fun fmtSize(bytes: Long): String = when {
-    bytes >= 1024L * 1024 * 1024 -> "%.1fGB".format(bytes / 1024f / 1024f / 1024f)
-    bytes >= 1024L * 1024 -> "%.1fMB".format(bytes / 1024f / 1024f)
-    bytes >= 1024L -> "%dKB".format(bytes / 1024)
-    else -> "${bytes}B"
-}
 
 @Preview(showBackground = true)
 @Composable
