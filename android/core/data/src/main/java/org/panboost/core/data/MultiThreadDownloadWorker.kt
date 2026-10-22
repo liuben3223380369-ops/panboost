@@ -61,6 +61,8 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         setForeground(createForegroundInfo(0, 0))
         appLog.info("download", "开始：${fileName.take(40)}（${threads} 线程）")
 
+        val speedTracker = SpeedTracker()
+
         val client = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
@@ -81,8 +83,6 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         val block = (total + threads - 1) / threads
         val dir = File(appContext.cacheDir, "parts_${id}")
         dir.mkdirs()
-        val speedTracker = SpeedTracker()
-        val totalWritten = java.util.concurrent.atomic.AtomicLong(0)
 
         try {
             coroutineScope {
