@@ -20,6 +20,7 @@ import javax.inject.Singleton
 class QuarkDriveRepository @Inject constructor(
     private val api: QuarkApi,
     private val fidsBody: FidsBodyFactory,
+    private val appLog: org.panboost.core.logging.AppLog,
 ) : DriveRepository {
 
     override suspend fun listFiles(pdirFid: String): List<DriveFile> {
@@ -31,7 +32,17 @@ class QuarkDriveRepository @Inject constructor(
         val root = JSONObject(body)
         checkCode(root)
         val list = root.optJSONObject("data")?.optJSONArray("list")
-            ?: return emptyList()
+        if (list == null) {
+            // v5.2.0：夸克对失效 Cookie 会返回"假成功"（code:0 但无 data）
+            // ——记入日志供诊断（日志屏可见）
+            appLog.warn("drive", "list 响应无 data.list：${body.take(160)}")
+            throw IllegalStateException(
+                "网盘列表为空响应（登录态可能已失效）——请到「账号」页删除夸克后重新登录"
+            )
+        }
+        if (list.length() == 0) {
+            appLog.info("drive", "目录为空（正常空目录）")
+        }
         return (0 until list.length()).mapNotNull { i ->
             val o = list.optJSONObject(i) ?: return@mapNotNull null
             DriveFile(
@@ -59,7 +70,14 @@ class QuarkDriveRepository @Inject constructor(
             is JSONObject -> data.optString("download_url")
             else -> ""
         }
-        require(url.startsWith("http")) { "直链解析失败：$body" }
+        if (!url.startsWith("http")) {
+            // v5.2.0：code:0 却无 download_url——夸克对失效 Cookie 的
+            // "假成功"形态（真机实锤）；完整响应记日志供诊断
+            appLog.error("drive", "直链响应无 download_url：${body.take(200)}")
+            throw IllegalStateException(
+                "直链解析失败（登录态已失效——请到「账号」页删除夸克后重新登录）"
+            )
+        }
         return url
     }
 

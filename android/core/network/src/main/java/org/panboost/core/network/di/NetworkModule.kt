@@ -39,6 +39,7 @@ object NetworkModule {
      */
     private class QuarkHeaderInterceptor(
         private val accounts: AccountRepository,
+        private val appLog: org.panboost.core.logging.AppLog,
     ) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val builder: Request.Builder = chain.request().newBuilder()
@@ -47,20 +48,30 @@ object NetworkModule {
                 .header("Origin", "https://pan.quark.cn")
             val old = accounts.getCookie("quark") ?: ""
             if (old.isNotEmpty()) builder.header("Cookie", old)
+            val started = System.currentTimeMillis()
             val resp = chain.proceed(builder.build())
+            // v5.2.0：全链路请求日志（日志屏此前"不记录"的根因——网络层零日志）
+            appLog.info(
+                "net",
+                "${chain.request().method} ${chain.request().url.encodedPath.take(60)}"
+                        + " → ${resp.code}（${System.currentTimeMillis() - started}ms）",
+            )
             // Set-Cookie 合并保活（新值覆盖同键旧值）
             try {
                 var merged = old
+                var renewed = 0
                 for (kv in resp.headers("Set-Cookie")) {
                     val part = kv.substringBefore(";")
                     val k = part.substringBefore("=").trim()
                     val v = part.substringAfter("=").trim()
                     if (k.isNotEmpty() && v.isNotEmpty()) {
                         merged = setKv(merged, k, v)
+                        renewed += 1
                     }
                 }
                 if (merged != old && merged.isNotEmpty()) {
                     accounts.setCookie("quark", merged)
+                    appLog.info("net", "Cookie 保活：续期 $renewed 个键")
                 }
             } catch (_: Exception) {
             }
@@ -80,9 +91,12 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(accounts: AccountRepository): OkHttpClient =
+    fun provideOkHttpClient(
+        accounts: AccountRepository,
+        appLog: org.panboost.core.logging.AppLog,
+    ): OkHttpClient =
         OkHttpClient.Builder()
-            .addInterceptor(QuarkHeaderInterceptor(accounts))
+            .addInterceptor(QuarkHeaderInterceptor(accounts, appLog))
             .addInterceptor(org.panboost.core.network.PersonaInterceptor())
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -120,6 +121,49 @@ internal fun HomeScreenContent(
                 .padding(padding),
         ) {
             if (uiState.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+
+            // v5.2.0：网盘选择条（已登录/已存 Cookie 的网盘——v3.2.8 首页宫格语义）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                uiState.availablePans.forEach { entry ->
+                    FilterChip(
+                        selected = uiState.selectedPan == entry.pan.key,
+                        onClick = { onIntent(HomeIntent.SelectPan(entry.pan.key)) },
+                        label = {
+                            Text(
+                                entry.pan.name + if (entry.verified) "" else "（未验证）",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        },
+                    )
+                }
+            }
+
+            // 非夸克网盘：浏览接入预告
+            if (uiState.selectedPan != "quark") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "${uiState.selectedPanName} 的登录 Cookie 已保存",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "该网盘的原生浏览下载正在接入中（ROADMAP）——分享链接下载可用请先体验夸克",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             Text(
                 text = uiState.path.joinToString(" / ") { it.name },
                 style = MaterialTheme.typography.labelMedium,
@@ -131,7 +175,7 @@ internal fun HomeScreenContent(
             }
 
             // v5.1.1：空态/错误态持久 UI
-            if (uiState.showEmpty) {
+            if (uiState.showEmpty && uiState.selectedPan == "quark") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -182,7 +226,7 @@ internal fun HomeScreenContent(
                 }
             }
 
-            LazyColumn(
+            if (uiState.selectedPan == "quark") LazyColumn(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(uiState.files, key = { it.fid }) { file ->

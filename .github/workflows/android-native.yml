@@ -42,7 +42,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.1.1-android.apk; done
+          for f in *.apk; do mv "$f" panboost-5.2.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -55,12 +55,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.1.1——网盘列表空白三重根治。' '用户实锤"账号页已登录、网盘 Tab 却空白"的三条根因链一次修复：①生命周期刷新——网屏 ViewModel 只在首次创建时加载一次，先开网盘 Tab（未登录失败）→登录→回来同一实例永不再拉。现每次 Tab 回前台（ON_RESUME）自动重拉列表（加载中防抖）。②空态/错误态持久 UI——加载失败原来只闪一次提示即消失，现在网盘 Tab 常驻错误卡片（错误详情+重新加载按钮+一键直达账号页登录）。③Cookie 采集域修正——登录屏原来只查 catalog 域（quark.cn），而 __puus/__pus 实际种在登录页域（pan.quark.cn）——采到的 Cookie 不全带去 API 即失败。现多域合并采集（登录页 host 优先覆盖），登录态完整。' '既有：Set-Cookie 保活/1024 线程/防风控/三网盘分享/历史/日志。' > "$NOTES_FILE"
-          TAG="android-v5.1.1"
+          printf '%s\n' 'PanBoost v5.2.0——网络日志 + 网盘选择条 + 假成功诊断。' '三项修复：①网络层全链路日志——拦截器记录每个 API 请求（路径/状态码/耗时）与 Cookie 保活动作，仓库层记录异常响应原文（日志屏此前"不记录"的根因是网络层零日志——现在账号页右上"日志"可看全部请求流水，反馈问题时直接附 logs/app-日期.log）；②网盘选择条——网盘 Tab 顶部显示已登录网盘切换条（v3.2.8 首页宫格"选网盘"语义回归），切网盘重置路径加载，非夸克网盘显示接入预告（Cookie 已存好）；③假成功诊断——夸克对失效 Cookie 会返回 code:0 但无数据的"假成功"（真机实锤的"链解析失败{json}"即此），现在空列表/空直链都会记完整响应进日志并提示"登录态已失效，请到账号页删除后重新登录"。' '既有：三网盘分享/18 网盘账号/512~1024 线程/防风控/历史/崩溃捕获。' > "$NOTES_FILE"
+          TAG="android-v5.2.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.1.1（网盘列表空白根治）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.2.0（网络日志+网盘选择条）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

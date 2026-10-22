@@ -4,10 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.panboost.core.domain.AccountEntry
+import org.panboost.core.domain.AccountRepository
 import org.panboost.core.domain.DriveFile
 import org.panboost.core.domain.DriveRepository
 import org.panboost.core.domain.DownloadRepository
@@ -16,50 +20,76 @@ import java.util.UUID
 import javax.inject.Inject
 
 /**
- * 首屏 ViewModel（v5.1.1 生命周期刷新）。
+ * 首屏 ViewModel（v5.2.0 网盘选择层）。
  *
- * v5.1.0 及之前的结构性缺陷：init 只在 ViewModel 创建时加载一次
- * ——用户先开网盘 Tab（未登录→失败）→去账号页登录→回 Tab，
- * 同一实例不再刷新，列表永空。修复：
- * - Refresh 由 HomeScreen 的 ON_RESUME 生命周期事件触发（每次
- *   Tab 回前台都重拉；loading 中自动跳过防抖）
- * - 加载失败写入持久 error（UI 显示错误卡片+重试按钮，不再只
- *   闪一次 Snackbar）
+ * 账户流（已登录/已存 Cookie 网盘）与文件状态合并——网盘 Tab
+ * 顶部显示网盘选择条（v3.2.8 首页宫格语义）；切换网盘重置路径
+ * 并加载；非夸克网盘不拉 API（UI 显示接入预告，Cookie 已存好）。
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val driveRepository: DriveRepository,
     private val downloadRepository: DownloadRepository,
+    accountRepository: AccountRepository,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(HomeUiState())
-    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+    private val selectedPan = MutableStateFlow("quark")
+    private val panel = MutableStateFlow(HomeUiState())
+
+    val uiState: StateFlow<HomeUiState> = combine(
+        panel,
+        accountRepository.observeAll(),
+        selectedPan,
+    ) { p, accounts, sel ->
+        p.copy(
+            availablePans = accounts.filter { it.hasCookie },
+            selectedPan = sel,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = HomeUiState(),
+    )
 
     init {
-        load(_uiState.value.currentFid)
+        load(panel.value.currentFid)
     }
 
     fun onIntent(intent: HomeIntent) {
         when (intent) {
-            HomeIntent.Refresh -> load(_uiState.value.currentFid)
+            HomeIntent.Refresh -> load(panel.value.currentFid)
+            is HomeIntent.SelectPan -> selectPan(intent.panKey)
             is HomeIntent.OpenDir -> openDir(intent.dir)
             HomeIntent.NavigateUp -> navigateUp()
             is HomeIntent.DownloadFile -> downloadFile(intent.file)
-            HomeIntent.SnackbarShown -> _uiState.update {
-                it.copy(snackbar = null)
-            }
+            HomeIntent.SnackbarShown -> panel.update { it.copy(snackbar = null) }
         }
     }
 
+    private fun selectPan(panKey: String) {
+        if (panKey == selectedPan.value) return
+        selectedPan.value = panKey
+        panel.update {
+            it.copy(
+                path = listOf(Breadcrumb("0", "我的网盘")),
+                files = emptyList(),
+                error = null,
+            )
+        }
+        load("0")
+    }
+
     private fun load(fid: String) {
-        if (_uiState.value.loading) return  // 防抖
-        _uiState.update { it.copy(loading = true, error = null) }
+        if (panel.value.loading) return  // 防抖
+        // 仅夸克已接浏览 API（其余网盘 UI 占位，Cookie 已存）
+        if (selectedPan.value != "quark") return
+        panel.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             try {
                 val files = driveRepository.listFiles(fid)
-                _uiState.update { it.copy(loading = false, files = files) }
+                panel.update { it.copy(loading = false, files = files) }
             } catch (e: Exception) {
-                _uiState.update {
+                panel.update {
                     it.copy(
                         loading = false,
                         error = e.message?.take(120)
@@ -71,23 +101,23 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun openDir(dir: DriveFile) {
-        _uiState.update {
+        panel.update {
             it.copy(path = it.path + Breadcrumb(dir.fid, dir.name))
         }
         load(dir.fid)
     }
 
     private fun navigateUp() {
-        val state = _uiState.value
+        val state = panel.value
         if (state.path.size <= 1) return
-        _uiState.update { it.copy(path = state.path.dropLast(1)) }
-        load(_uiState.value.currentFid)
+        panel.update { it.copy(path = state.path.dropLast(1)) }
+        load(panel.value.currentFid)
     }
 
     private fun downloadFile(file: DriveFile) {
-        val state = _uiState.value
+        val state = panel.value
         if (state.downloading != null) return
-        _uiState.update { it.copy(downloading = file) }
+        panel.update { it.copy(downloading = file) }
         viewModelScope.launch {
             try {
                 val url = driveRepository.getDownloadUrl(file.fid)
@@ -100,12 +130,18 @@ class HomeViewModel @Inject constructor(
                         totalBytes = file.size,
                     )
                 )
-                _uiState.update {
-                    it.copy(downloading = null, snackbar = "已开始下载「${file.name}」——到下载页查看进度")
+                panel.update {
+                    it.copy(
+                        downloading = null,
+                        snackbar = "已开始下载「${file.name}」——到下载页查看进度",
+                    )
                 }
             } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(downloading = null, snackbar = "获取直链失败：${e.message?.take(60)}")
+                panel.update {
+                    it.copy(
+                        downloading = null,
+                        snackbar = "获取直链失败：${e.message?.take(60)}",
+                    )
                 }
             }
         }
