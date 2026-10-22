@@ -50,6 +50,8 @@ class PanCatalogTest {
     @Test
     fun byShareUrl_lanzouMultiDomain() {
         assertEquals("lanzou", PanCatalog.byShareUrl("https://wwp.lanzouv.com/iABCD")?.key)
+        assertEquals("lanzou", PanCatalog.byShareUrl("https://wwp.lanzouq.com/iABCD")?.key)
+        assertEquals("lanzou", PanCatalog.byShareUrl("https://www.lanzn.com/iABCD")?.key)
     }
 
     @Test

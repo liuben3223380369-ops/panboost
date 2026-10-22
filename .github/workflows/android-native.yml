@@ -36,8 +36,17 @@ jobs:
       - name: Lint (v5.4.0：静态检查基线——NIA 对照查缺)
         run: cd android && ./gradlew lintRelease || true
 
-      - name: Unit tests (v5.4.1：硬门禁——19+ 用例全绿才过)
-        run: cd android && ./gradlew testReleaseUnitTest
+      - name: Unit tests (v5.4.1：硬门禁——29 用例全绿才过)
+        run: |
+          cd android && ./gradlew testReleaseUnitTest || {
+            echo "::group::测试失败详情"
+            find . -path "*/test-results/*/TEST-*.xml" -exec grep -l "failure" {} \; | while read f; do
+              echo "=== $f"
+              grep -A4 "<failure" "$f" | head -12
+            done
+            echo "::endgroup::"
+            exit 1
+          }
 
       - name: Assemble release APK
         run: cd android && ./gradlew assembleRelease --stacktrace
