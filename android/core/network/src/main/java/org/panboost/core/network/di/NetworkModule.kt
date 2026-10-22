@@ -46,7 +46,11 @@ object NetworkModule {
                 .header("User-Agent", QuarkApi.CLIENT_UA)
                 .header("Referer", QuarkApi.REFERER)
                 .header("Origin", "https://pan.quark.cn")
-            val old = accounts.getCookie("quark") ?: ""
+            // v5.2.1：Cookie 改实时读 WebView 全局 Cookie 罐（根治
+            // "登录 3 秒即失效"）——快照是死值，__puus 登录后立即
+            // 轮换且每次响应都刷新；实时读 CookieManager 一切轮换
+            // 自动反映（CookieManager 方法线程安全，可 IO 线程调）
+            val old = liveQuarkCookie()
             if (old.isNotEmpty()) builder.header("Cookie", old)
             val started = System.currentTimeMillis()
             val resp = chain.proceed(builder.build())
@@ -70,12 +74,40 @@ object NetworkModule {
                     }
                 }
                 if (merged != old && merged.isNotEmpty()) {
+                    // v5.2.1：保活写回 WebView 罐（下次请求实时取到）
+                    writeBackQuarkCookie(merged)
                     accounts.setCookie("quark", merged)
                     appLog.info("net", "Cookie 保活：续期 $renewed 个键")
                 }
             } catch (_: Exception) {
             }
             return resp
+        }
+
+        /** 实时读 WebView 全局 Cookie 罐（quark.cn 域树，登录态永远新鲜）。 */
+        private fun liveQuarkCookie(): String = try {
+            val cm = android.webkit.CookieManager.getInstance()
+            listOf("https://pan.quark.cn", "https://quark.cn")
+                .mapNotNull { cm.getCookie(it) }
+                .joinToString("; ")
+                .ifEmpty { "" }
+        } catch (_: Exception) {
+            ""
+        }
+
+        /** 响应 Set-Cookie 写回 WebView 罐（保活闭环）。 */
+        private fun writeBackQuarkCookie(merged: String) {
+            try {
+                val cm = android.webkit.CookieManager.getInstance()
+                for (kv in merged.split("; ")) {
+                    val k = kv.substringBefore("=").trim()
+                    if (k.isNotEmpty()) {
+                        cm.setCookie("https://pan.quark.cn", kv)
+                    }
+                }
+                cm.flush()
+            } catch (_: Exception) {
+            }
         }
 
         private fun setKv(cookie: String, k: String, v: String): String {

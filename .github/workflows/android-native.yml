@@ -42,7 +42,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.2.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-5.2.1-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -55,12 +55,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.2.0——网络日志 + 网盘选择条 + 假成功诊断。' '三项修复：①网络层全链路日志——拦截器记录每个 API 请求（路径/状态码/耗时）与 Cookie 保活动作，仓库层记录异常响应原文（日志屏此前"不记录"的根因是网络层零日志——现在账号页右上"日志"可看全部请求流水，反馈问题时直接附 logs/app-日期.log）；②网盘选择条——网盘 Tab 顶部显示已登录网盘切换条（v3.2.8 首页宫格"选网盘"语义回归），切网盘重置路径加载，非夸克网盘显示接入预告（Cookie 已存好）；③假成功诊断——夸克对失效 Cookie 会返回 code:0 但无数据的"假成功"（真机实锤的"链解析失败{json}"即此），现在空列表/空直链都会记完整响应进日志并提示"登录态已失效，请到账号页删除后重新登录"。' '既有：三网盘分享/18 网盘账号/512~1024 线程/防风控/历史/崩溃捕获。' > "$NOTES_FILE"
-          TAG="android-v5.2.0"
+          printf '%s\n' 'PanBoost v5.2.1——"登录3秒即失效"根治。' '根因（架构级）：登录屏把 WebView 采集的 Cookie 存成快照供 API 使用——但夸克 __puus 是会话签名、登录后会立即轮换且每次响应都刷新，死快照 3 秒后就是废值；且"已完成登录"按钮只校验 Cookie 非空（无关跟踪 Cookie 也算数）。修复：①Cookie 改实时读——API 拦截器每次请求直接读 WebView 全局 Cookie 罐（登录后一切轮换/续期自动反映，永不过时）；Set-Cookie 保活同步写回该罐形成闭环；②手动登录按钮严格校验特征键（__pus/__puus 全命中才保存，否则红字提示"未检测到完整登录凭证"）。' '既有：三网盘分享/网盘选择条/全链路日志/512~1024 线程/防风控/历史。' > "$NOTES_FILE"
+          TAG="android-v5.2.1"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.2.0（网络日志+网盘选择条）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.2.1（登录3秒失效根治）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

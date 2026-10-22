@@ -120,15 +120,38 @@ internal fun LoginScreenContent(
                 },
                 modifier = Modifier.fillMaxSize(),
             )
+            var manualHint by remember { mutableStateOf("") }
             Button(
                 onClick = {
-                    collectCookie(collectDomains)?.let { onCookie(it) }
+                    val cookie = collectCookie(collectDomains)
+                    // v5.2.1：手动保存严格校验特征键（此前"Cookie 非空"
+                    // 即存——无关跟踪 Cookie 也算，存下的快照请求必失败，
+                    // 真机"登录 3 秒即失效"根因之一）
+                    val complete = cookie != null && (
+                            authKeys.isEmpty() ||
+                                    authKeys.all {
+                                        cookie!!.contains("$it=", ignoreCase = true)
+                                    }
+                            )
+                    if (complete) {
+                        onCookie(cookie!!)
+                    } else {
+                        manualHint = "未检测到完整登录凭证（${authKeys.joinToString("/")}）——请先在页面完成登录再点此按钮"
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp),
             ) {
                 Text("我已完成登录")
+            }
+            if (manualHint.isNotEmpty()) {
+                Text(
+                    text = manualHint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
             }
         }
     }
