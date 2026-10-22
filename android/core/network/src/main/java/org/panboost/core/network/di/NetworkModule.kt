@@ -76,7 +76,7 @@ object NetworkModule {
     // v5.0.0：123 云盘分享 API（独立 baseUrl 的第二 Retrofit）
     @Provides
     @Singleton
-    @dagger.hilt.android.qualifiers.Named("pan123")
+    @javax.inject.Named("pan123")
     fun providePan123Retrofit(client: OkHttpClient): Retrofit =
         Retrofit.Builder()
             .baseUrl(org.panboost.core.network.Pan123ShareApi.BASE_URL)
@@ -86,7 +86,7 @@ object NetworkModule {
     @Provides
     @Singleton
     fun providePan123ShareApi(
-        @dagger.hilt.android.qualifiers.Named("pan123") retrofit: Retrofit,
+        @javax.inject.Named("pan123") retrofit: Retrofit,
     ): org.panboost.core.network.Pan123ShareApi =
         retrofit.create(org.panboost.core.network.Pan123ShareApi::class.java)
 

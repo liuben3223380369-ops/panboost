@@ -37,11 +37,4 @@ abstract class RepositoryModule {
     abstract fun bindAccountRepository(
         impl: MultiPanCookieStore,
     ): AccountRepository
-
-    // v5.0.0：下载历史仓库
-    @Binds
-    @Singleton
-    abstract fun bindDownloadHistoryRepository(
-        impl: org.panboost.core.data.DownloadHistoryStore,
-    ): org.panboost.core.domain.DownloadHistoryRepository
 }

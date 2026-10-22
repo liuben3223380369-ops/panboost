@@ -20,4 +20,11 @@ abstract class DataModule {
     abstract fun bindDownloadRepository(
         impl: DownloadRepositoryImpl,
     ): DownloadRepository
+
+    // v5.0.0：下载历史仓库（实现在本模块）
+    @Binds
+    @Singleton
+    abstract fun bindDownloadHistoryRepository(
+        impl: DownloadHistoryStore,
+    ): org.panboost.core.domain.DownloadHistoryRepository
 }
