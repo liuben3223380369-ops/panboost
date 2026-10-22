@@ -27,7 +27,7 @@ object PanCatalog {
             "quark", "夸克网盘",
             "https://pan.quark.cn/", "https://pan.quark.cn/web/drive",
             listOf("quark.cn"),
-            listOf("__pus", "__puus"),
+            listOf("__uid", "__pus", "__puus"),
             listOf("pan.quark.cn/s/"),
         ),
         PanInfo(
