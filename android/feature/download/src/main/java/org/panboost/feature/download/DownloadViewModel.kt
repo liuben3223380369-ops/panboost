@@ -31,6 +31,8 @@ class DownloadViewModel @Inject constructor(
     private val downloadRepository: DownloadRepository,
 ) : ViewModel() {
 
+    private val _urlInput = MutableStateFlow("")
+
     val uiState: StateFlow<DownloadUiState> =
         kotlinx.coroutines.flow.combine(
             downloadRepository.observeAll(),
@@ -41,8 +43,6 @@ class DownloadViewModel @Inject constructor(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = DownloadUiState(),
             )
-
-    private val _urlInput = MutableStateFlow("")
 
     fun onIntent(intent: DownloadIntent) {
         when (intent) {
