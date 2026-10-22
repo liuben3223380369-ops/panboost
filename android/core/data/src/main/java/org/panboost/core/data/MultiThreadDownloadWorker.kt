@@ -137,7 +137,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 androidx.work.workDataOf(
                     MockDownloadWorker.KEY_BYTES to total,
                     MockDownloadWorker.KEY_TOTAL to total,
-                    KEY_SPEED to speedTracker.rate(),
+                    KEY_SPEED to (speedTracker?.rate() ?: 0L),
                 )
             )
         } catch (e: Exception) {
@@ -249,7 +249,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                                 androidx.work.workDataOf(
                                     MockDownloadWorker.KEY_BYTES to written,
                                     MockDownloadWorker.KEY_TOTAL to total,
-                                    KEY_SPEED to speedTracker.rate(),
+                                    KEY_SPEED to (speedTracker?.rate() ?: 0L),
                                 )
                             )
                         }

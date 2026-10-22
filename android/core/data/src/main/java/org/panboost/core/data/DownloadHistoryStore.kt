@@ -33,8 +33,9 @@ class DownloadHistoryStore @Inject constructor(
 
     private val state = MutableStateFlow(load())
 
-    private fun load(): DownloadHistoryList = try {
+    private fun load(): DownloadHistoryList {
         if (!file.exists()) return DownloadHistoryList()
+        return try {
         val root = JSONObject(file.readText())
         val arr = root.optJSONArray("items") ?: JSONArray()
         val items = (0 until arr.length()).mapNotNull { i ->
@@ -48,9 +49,10 @@ class DownloadHistoryStore @Inject constructor(
                 speed = o.optLong("speed"),
             )
         }
-        DownloadHistoryList(enabled = root.optBoolean("enabled", true), items = items)
-    } catch (_: Exception) {
-        DownloadHistoryList()
+            DownloadHistoryList(enabled = root.optBoolean("enabled", true), items = items)
+        } catch (_: Exception) {
+            DownloadHistoryList()
+        }
     }
 
     /** 供仓库层读取当前态（enqueue 后落史用）。 */
