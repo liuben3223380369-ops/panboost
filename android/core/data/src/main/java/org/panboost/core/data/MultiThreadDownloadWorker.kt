@@ -49,6 +49,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val writer: MediaStoreDownloadsWriter,
     private val appLog: AppLog,
+    private val accounts: org.panboost.core.domain.AccountRepository,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun getForegroundInfo(): ForegroundInfo =
@@ -67,6 +68,14 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             ?: "application/octet-stream"
         val referer = inputData.getString(KEY_REFERER) ?: QuarkApi.REFERER
         val threadsChoice = inputData.getInt(KEY_THREADS, DEFAULT_THREADS)
+        // v5.3.3：直链请求带 Cookie（夸克直链校验 __puus 签名——
+        // 真机实锤 HTTP 412 的根因：此前只带 Referer/UA）
+        val dlCookie = runCatching {
+            val cm = android.webkit.CookieManager.getInstance()
+            listOf("https://pan.quark.cn", "https://quark.cn")
+                .mapNotNull { cm.getCookie(it) }
+                .joinToString("; ")
+        }.getOrDefault("")
 
         setForeground(createForegroundInfo(0, 0))
         appLog.info("download", "开始：${fileName.take(40)}（${threadsChoice} 线程）")
@@ -92,19 +101,19 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             .build()
 
         // v5.3.2：探测（HEAD 被拒 → GET Range 探测 → 全失败降级单流）
-        val probe = probeRange(client, url, referer)
+        val probe = probeRange(client, url, referer, dlCookie)
         if (probe == null) {
             appLog.warn(
                 "download",
                 "HEAD/Range 探测均失败（CDN 拒绝探测）——降级单流 GET：$fileName",
             )
             return downloadSingleStream(
-                client, url, fileName, mime, referer, speedTracker,
+                client, url, fileName, mime, referer, dlCookie, speedTracker,
             )
         }
         if (!probe.rangeOk || probe.total <= 0) {
             return downloadSingleStream(
-                client, url, fileName, mime, referer, speedTracker,
+                client, url, fileName, mime, referer, dlCookie, speedTracker,
             )
         }
         val total = probe.total
@@ -351,6 +360,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         client: OkHttpClient,
         url: String,
         referer: String,
+        dlCookie: String,
     ): ProbeInfo? {
         // 1. HEAD 探测
         try {
@@ -359,6 +369,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 .head()
                 .header("Referer", referer)
                 .header("User-Agent", QuarkApi.CLIENT_UA)
+                .apply { if (dlCookie.isNotBlank()) header("Cookie", dlCookie) }
                 .build()
             client.newCall(request).execute().use { resp ->
                 if (resp.isSuccessful) {
@@ -376,6 +387,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 .header("Referer", referer)
                 .header("User-Agent", QuarkApi.CLIENT_UA)
                 .header("Range", "bytes=0-0")
+                .apply { if (dlCookie.isNotBlank()) header("Cookie", dlCookie) }
                 .build()
             client.newCall(request).execute().use { resp ->
                 if (resp.isSuccessful || resp.code == 206) {
@@ -401,12 +413,14 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         fileName: String,
         mime: String,
         referer: String,
+        dlCookie: String,
         speedTracker: SpeedTracker?,
     ): Result {
         val request = Request.Builder()
             .url(url)
             .header("Referer", referer)
             .header("User-Agent", QuarkApi.CLIENT_UA)
+            .apply { if (dlCookie.isNotBlank()) header("Cookie", dlCookie) }
             .build()
         val response = try {
             client.newCall(request).execute()

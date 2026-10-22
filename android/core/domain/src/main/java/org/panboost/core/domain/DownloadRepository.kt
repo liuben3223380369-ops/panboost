@@ -13,11 +13,12 @@ import kotlinx.coroutines.flow.Flow
  *   刷新进度）
  * - cancel：取消排队/运行中任务（运行中的半成品文件由实现
  *   负责清理）
- * - retry：失败/取消任务重新入队（REPLACE 语义）
+ * - retry：失败/取消任务重新入队（REPLACE 语义，携带原任务参数）
  */
 interface DownloadRepository {
     fun enqueue(task: DownloadTask)
     fun observeAll(): Flow<List<DownloadTask>>
     fun cancel(taskId: String)
-    fun retry(taskId: String)
+    /** v5.3.3：重试传完整任务（原 URL/文件名/线程）——修复"重试变模拟下载"。 */
+    fun retry(task: DownloadTask)
 }

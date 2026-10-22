@@ -42,7 +42,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.3.2-android.apk; done
+          for f in *.apk; do mv "$f" panboost-5.3.3-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -55,12 +55,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.3.2——CDN 探测降级修正。' 'v5.3.1 日志实锤直链已取得、512 线程下载已发起——死在 HEAD 探测：夸克 CDN 直链拒绝 HEAD 请求（很多 CDN 只支持 GET），旧逻辑探测失败即整个任务失败。修复：①双重探测——HEAD 失败自动改用 GET Range bytes=0-0 探测（Content-Range 响应头给出真实总长，206 即支持分块）；②两者都失败降级单流 GET 下载（Content-Length 兜底）——下载永不因探测而死；③失败/成功结果与进度首报全部携带文件名（历史记录不再回退成 panboost.bin）；④单流失败补诊断日志（HTTP 状态码/异常）。' '既有：Cookie 实时罐/三形态直链解析/泛化拦截器/防风控。' > "$NOTES_FILE"
-          TAG="android-v5.3.2"
+          printf '%s\n' 'PanBoost v5.3.3——直链 Cookie + 重试根治。' 'v5.3.2 日志实锤两 bug：①单流 HTTP 412——夸克直链校验 __puus Cookie 签名，此前直链请求只带 Referer/UA 没带 Cookie（v3.2.8 引擎本就带 Cookie）；②点击重试变成模拟下载（panboost.bin 完成）——retry() 还是早期验证代码，用 MockDownloadWorker 重建任务。修复：①Worker 注入账号仓库，直链全链路（HEAD 探测/GET Range 探测/分块下载/单流降级）统一携带实时 Cookie；②retry(task) 重签名传完整原任务（原 URL/文件名/线程数）——重试=原任务重跑，mock:// 前缀仍走模拟（验证路径保留）。' '既有：Cookie 实时罐/三形态直链解析/CDN 双重探测降级/512~1024 线程/防风控。' > "$NOTES_FILE"
+          TAG="android-v5.3.3"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.3.2（CDN探测降级修正）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.3.3（直链Cookie+重试根治）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

@@ -55,7 +55,11 @@ class DownloadViewModel @Inject constructor(
             is DownloadIntent.UrlChanged -> _urlInput.value = intent.url
             is DownloadIntent.ThreadsChanged -> _threadsChoice.value = intent.choice
             is DownloadIntent.Cancel -> downloadRepository.cancel(intent.taskId)
-            is DownloadIntent.Retry -> downloadRepository.retry(intent.taskId)
+            is DownloadIntent.Retry -> {
+                // v5.3.3：从当前状态找原任务（完整 URL/文件名/线程）
+                uiState.value.tasks.firstOrNull { it.id == intent.taskId }
+                    ?.let { downloadRepository.retry(it) }
+            }
         }
     }
 

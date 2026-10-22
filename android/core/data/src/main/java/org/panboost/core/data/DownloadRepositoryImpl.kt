@@ -141,20 +141,16 @@ class DownloadRepositoryImpl @Inject constructor(
         workManager.cancelUniqueWork(uniqueName(taskId))
     }
 
-    override fun retry(taskId: String) {
-        // REPLACE 语义：失败/取消任务被新请求顶替重新排队
-        val request = OneTimeWorkRequestBuilder<MockDownloadWorker>()
-            .setInputData(
-                workDataOf(
-                    MockDownloadWorker.KEY_FILE_NAME to "panboost_${taskId.take(8)}.bin",
-                    MockDownloadWorker.KEY_MIME to "application/octet-stream",
-                    MockDownloadWorker.KEY_TOTAL to MockDownloadWorker.DEFAULT_TOTAL,
-                )
-            )
-            .addTag(TAG)
-            .build()
+    override fun retry(task: DownloadTask) {
+        // v5.3.3：重试重建原任务（此前误用 MockDownloadWorker——
+        // "点击重试后自动变成模拟下载"的根因）
+        val request = if (task.url.startsWith("mock://")) {
+            mockRequest(task)
+        } else {
+            urlRequest(task)
+        }
         workManager.enqueueUniqueWork(
-            uniqueName(taskId),
+            uniqueName(task.id),
             ExistingWorkPolicy.REPLACE,
             request,
         )

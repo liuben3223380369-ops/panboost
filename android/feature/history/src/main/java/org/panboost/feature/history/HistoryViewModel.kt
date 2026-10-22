@@ -40,7 +40,7 @@ class HistoryViewModel @Inject constructor(
 
     fun setEnabled(enabled: Boolean) = history.setEnabled(enabled)
 
-    /** 失败/取消条目重新入队（v3.2.8 失败重跑）。 */
+    /** 失败/取消条目重新入队（v3.2.8 失败重跑；v5.3.3 带完整参数）。 */
     fun retry(entry: DownloadHistoryEntry) {
         downloadRepository.enqueue(
             DownloadTask(
@@ -49,6 +49,7 @@ class HistoryViewModel @Inject constructor(
                 fileName = entry.name,
                 mimeType = guessMime(entry.name),
                 totalBytes = entry.size,
+                threadsChoice = "512",
             )
         )
         history.add(entry.copy(status = "重跑", ts = System.currentTimeMillis()))
