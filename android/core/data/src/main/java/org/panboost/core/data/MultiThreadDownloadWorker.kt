@@ -70,13 +70,13 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         val probe = probeRange(client, url, referer)
             ?: return Result.failure()
         if (!probe.rangeOk) {
-            return downloadSingleStream(client, url, fileName, mime, referer)
+            return downloadSingleStream(client, url, fileName, mime, referer, speedTracker)
         }
 
         // ---- 分块并发 ----
         val total = probe.total
         if (total <= 0) {
-            return downloadSingleStream(client, url, fileName, mime, referer)
+            return downloadSingleStream(client, url, fileName, mime, referer, speedTracker)
         }
         val block = (total + threads - 1) / threads
         val dir = File(appContext.cacheDir, "parts_${id}")
@@ -213,6 +213,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         fileName: String,
         mime: String,
         referer: String,
+        speedTracker: SpeedTracker? = null,
     ): Result {
         val request = Request.Builder()
             .url(url)
@@ -242,6 +243,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                         if (n < 0) break
                         output.stream.write(buf, 0, n)
                         written += n
+                        speedTracker?.add(n.toLong())
                         if (total > 0) {
                             setProgress(
                                 androidx.work.workDataOf(
