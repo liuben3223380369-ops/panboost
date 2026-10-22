@@ -14,6 +14,8 @@ import org.panboost.core.domain.DownloadTask
 data class DownloadUiState(
     val tasks: List<DownloadTask> = emptyList(),
     val urlInput: String = "",
+    /** 线程选择（v5.1.0：auto/8~1024，默认 512）。 */
+    val threadsChoice: String = "512",
 ) {
     val activeCount: Int
         get() = tasks.count {
@@ -29,6 +31,9 @@ sealed interface DownloadIntent {
     data object StartMockDownload : DownloadIntent
     data object StartUrlDownload : DownloadIntent
     data class UrlChanged(val url: String) : DownloadIntent
+
+    /** 线程选择切换（v5.1.0）。 */
+    data class ThreadsChanged(val choice: String) : DownloadIntent
     data class Cancel(val taskId: String) : DownloadIntent
     data class Retry(val taskId: String) : DownloadIntent
 }

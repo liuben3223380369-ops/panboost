@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -76,12 +77,24 @@ internal fun DownloadScreenContent(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            ThreadsOptions.forEach { opt ->
+                FilterChip(
+                    selected = uiState.threadsChoice == opt,
+                    onClick = { onIntent(DownloadIntent.ThreadsChanged(opt)) },
+                    label = { Text(opt, style = MaterialTheme.typography.labelSmall) },
+                )
+            }
+        }
         Button(
             onClick = { onIntent(DownloadIntent.StartUrlDownload) },
             enabled = uiState.urlInput.startsWith("http"),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("开始下载")
+            Text("开始下载（${uiState.threadsChoice} 线程）")
         }
         Button(
             onClick = { onIntent(DownloadIntent.StartMockDownload) },
@@ -225,3 +238,8 @@ private fun DownloadScreenPreview() {
         )
     }
 }
+
+
+internal val ThreadsOptions = listOf(
+    "auto", "8", "16", "64", "128", "256", "512", "1024",
+)

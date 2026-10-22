@@ -32,12 +32,16 @@ class DownloadViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _urlInput = MutableStateFlow("")
+    private val _threadsChoice = MutableStateFlow("512")
 
     val uiState: StateFlow<DownloadUiState> =
         kotlinx.coroutines.flow.combine(
             downloadRepository.observeAll(),
             _urlInput,
-        ) { tasks, url -> DownloadUiState(tasks = tasks, urlInput = url) }
+            _threadsChoice,
+        ) { tasks, url, threads ->
+            DownloadUiState(tasks = tasks, urlInput = url, threadsChoice = threads)
+        }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
@@ -49,6 +53,7 @@ class DownloadViewModel @Inject constructor(
             DownloadIntent.StartMockDownload -> startMockDownload()
             DownloadIntent.StartUrlDownload -> startUrlDownload()
             is DownloadIntent.UrlChanged -> _urlInput.value = intent.url
+            is DownloadIntent.ThreadsChanged -> _threadsChoice.value = intent.choice
             is DownloadIntent.Cancel -> downloadRepository.cancel(intent.taskId)
             is DownloadIntent.Retry -> downloadRepository.retry(intent.taskId)
         }
@@ -66,6 +71,7 @@ class DownloadViewModel @Inject constructor(
                     .ifEmpty { "panboost_${url.hashCode().toUInt()}.bin" },
                 mimeType = "application/octet-stream",
                 totalBytes = 0L,
+                threadsChoice = _threadsChoice.value,
             )
         )
         _urlInput.value = ""

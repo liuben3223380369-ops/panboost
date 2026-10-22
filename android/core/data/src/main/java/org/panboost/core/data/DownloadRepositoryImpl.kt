@@ -87,7 +87,7 @@ class DownloadRepositoryImpl @Inject constructor(
                 workDataOf(
                     MultiThreadDownloadWorker.KEY_URL to task.url,
                     MultiThreadDownloadWorker.KEY_REFERER to "https://pan.quark.cn/",
-                    MultiThreadDownloadWorker.KEY_THREADS to MultiThreadDownloadWorker.DEFAULT_THREADS,
+                    MultiThreadDownloadWorker.KEY_THREADS to parseThreads(task.threadsChoice),
                     MockDownloadWorker.KEY_FILE_NAME to task.fileName,
                     MockDownloadWorker.KEY_MIME to task.mimeType,
                 )
@@ -195,6 +195,14 @@ class DownloadRepositoryImpl @Inject constructor(
     }
 
     private fun uniqueName(id: String) = "download-$id"
+
+    /** 线程选择解析（v5.1.0："auto"→0 哨兵；数字 clamp [1,1024]）。 */
+    private fun parseThreads(choice: String): Int = when {
+        choice.equals("auto", ignoreCase = true) ->
+            MultiThreadDownloadWorker.AUTO_THREADS
+        else -> (choice.toIntOrNull() ?: MultiThreadDownloadWorker.DEFAULT_THREADS)
+            .coerceIn(1, MultiThreadDownloadWorker.MAX_THREADS)
+    }
 
     companion object {
         private const val TAG = "panboost-download"

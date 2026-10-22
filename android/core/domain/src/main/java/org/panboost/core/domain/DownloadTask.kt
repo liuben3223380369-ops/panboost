@@ -18,6 +18,8 @@ data class DownloadTask(
     val progress: Float = 0f,
     /** 实时速率 B/s（v5.0.0：Worker 滑动窗口）。 */
     val speedBps: Long = 0L,
+    /** 线程选择（v5.1.0：auto/8~1024，默认 512）。 */
+    val threadsChoice: String = "512",
 )
 
 /** 任务生命周期。 */

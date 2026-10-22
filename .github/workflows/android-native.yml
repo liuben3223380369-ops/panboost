@@ -42,7 +42,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.0.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-5.1.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -55,12 +55,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.0.0——v3.2.8 功能面补齐版（大版本）。' '上一版根治了启动闪退（v4.0~v4.3 的 namespace/相对类名失配雷）。本版把 v3.2.8 的完整功能面一次性补齐：①分享链接三网盘——夸克 + 123云盘（免登录 API）+ 蓝奏云（HTML 解析流）自动识别分发；②下载历史屏——永久记录 200 条（名称/大小/状态/速度/时间）、记录开关、清空、失败重跑；③日志屏——实时环形缓冲 500 条 + app-日期.log 按天轮转保留 7 天（文件管理器可取回反馈）；④下载屏新增"粘贴直链开始下载"（v3.2.8 高级下载）+ 实时速率显示（MB/s）；⑤底部五 Tab（分享/网盘/下载/历史/账号）对齐 v3.2.8 五屏，日志从账号页进入。' '既有：18 网盘账号管理、多线程分块+断点续传+前台服务、崩溃捕获、启动链门禁。' '与 v3.2.8 的剩余差距见 ROADMAP（多网盘浏览下载逐家接入、auto 线程数等）。' '权限：网络+前台服务+通知，零存储权限。' > "$NOTES_FILE"
-          TAG="android-v5.0.0"
+          printf '%s\n' 'PanBoost v5.1.0——401 根治 + 1024 线程 + 防风控版。' '三项核心修复：①网盘浏览 401 根治——根因是漏掉了 v3.2.8 的 Cookie 保活机制（夸克 __puus 约 3 小时过期），现每次 API 响应的 Set-Cookie 自动合并回存储持久化（登录态持续保活）；401/403 时明确提示"登录已过期，请到账号页重新登录"。②线程数对齐 v3.2.8——下载屏线程选择器（auto/8/16/64/128/256/512/1024，默认 512）：auto 为实测调优（>64MB 时单连接 vs 16 并发吞吐比）；引擎块模型与旧版同构（threads×8 块、块大小 512KB~64MB 自适应）；OkHttp 并发上限调至 1024。③防风控（PersonaKit 原生）——浏览器风格请求头补全（Accept/Accept-Language + Chrome Sec-Fetch 组）、Accept-Encoding 固定 identity（Range 下载防字节错位）、UA 池轮换（403 时自动换 UA 重试）、块间随机抖动（避免完美等间隔请求特征）。' '既有：三网盘分享下载/18 网盘账号/历史/日志/前台服务/崩溃捕获。' '权限：网络+前台服务+通知，零存储权限。' > "$NOTES_FILE"
+          TAG="android-v5.1.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.0.0（v3.2.8 功能面补齐）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.1.0（401根治+1024线程+防风控）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

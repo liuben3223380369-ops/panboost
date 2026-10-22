@@ -23,7 +23,11 @@ class QuarkDriveRepository @Inject constructor(
 ) : DriveRepository {
 
     override suspend fun listFiles(pdirFid: String): List<DriveFile> {
-        val body = api.listFiles(pdirFid = pdirFid).string()
+        val body = try {
+            api.listFiles(pdirFid = pdirFid).string()
+        } catch (e: retrofit2.HttpException) {
+            throw IllegalStateException(mapHttpError(e))
+        }
         val root = JSONObject(body)
         checkCode(root)
         val list = root.optJSONObject("data")?.optJSONArray("list")
@@ -41,7 +45,11 @@ class QuarkDriveRepository @Inject constructor(
     }
 
     override suspend fun getDownloadUrl(fid: String): String {
-        val body = api.getDownloadUrl(body = fidsBody.create(fid)).string()
+        val body = try {
+            api.getDownloadUrl(body = fidsBody.create(fid)).string()
+        } catch (e: retrofit2.HttpException) {
+            throw IllegalStateException(mapHttpError(e))
+        }
         val root = JSONObject(body)
         checkCode(root)
         val data = root.opt("data")
@@ -53,6 +61,13 @@ class QuarkDriveRepository @Inject constructor(
         }
         require(url.startsWith("http")) { "直链解析失败：$body" }
         return url
+    }
+
+    /** HTTP 层错误映射（v5.1.0：401 = Cookie 过期引导重登）。 */
+    private fun mapHttpError(e: retrofit2.HttpException): String = when (e.code()) {
+        401, 403 -> "登录已过期（夸克 Cookie 约 3 小时限）——请到「账号」页重新登录夸克"
+        429 -> "请求过于频繁被限流——请稍后再试"
+        else -> "网盘接口错误 HTTP ${e.code()}"
     }
 
     private fun checkCode(root: JSONObject) {
