@@ -24,35 +24,47 @@ interface QuarkApi {
     suspend fun listFiles(
         @Query("pr") pr: String = "ucpro",
         @Query("fr") fr: String = "pc",
+        @Query("uc_param_str") ucParamStr: String = "",
         @Query("pdir_fid") pdirFid: String,
         @Query("_page") page: Int = 1,
         @Query("_size") size: Int = 100,
+        @Query("_fetch_total") fetchTotal: Int = 1,
+        @Query("_fetch_sub_dirs") fetchSubDirs: Int = 0,
         @Query("_sort") sort: String = "file_type:asc,updated_at:desc",
+        @Query("_fetch_full_path") fetchFullPath: Int = 0,
         @Query("fetch_all_file") fetchAll: Int = 1,
-        @Query("fetch_total") fetchTotal: Int = 1,
+        @Query("fetch_risk_file_name") fetchRiskFileName: Int = 1,
     ): ResponseBody
 
     @POST("1/clouddrive/file/download")
     suspend fun getDownloadUrl(
         @Query("pr") pr: String = "ucpro",
         @Query("fr") fr: String = "pc",
+        @Query("uc_param_str") ucParamStr: String = "",
         @retrofit2.http.Body body: okhttp3.RequestBody,
     ): ResponseBody
 
     companion object {
         const val BASE_URL = "https://drive-pc.quark.cn/"
 
-        /** 网页版客户端 UA（YunX 实锤规格）。 */
+        /**
+         * 网页版客户端 UA（v5.3.0：对齐 quark-auto-save 实战版本——
+         * 3072★项目长期验证的形态，旧 2.5.20 可能已过风控期）。
+         */
         const val CLIENT_UA =
-            "quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 " +
-                    "Electron/18.3.5.12-a038f7b798 Safari/537.36 " +
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) quark-cloud-drive/3.14.2 " +
+                    "Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 " +
                     "Channel/pckk_other_ch"
 
         const val REFERER = "https://pan.quark.cn/"
         const val LOGIN_URL = "https://pan.quark.cn/"
         const val COOKIE_DOMAIN = "https://pan.quark.cn"
 
-        /** 登录成功特征键（命中即认为已登录）。 */
-        val AUTH_COOKIE_KEYS = listOf("__pus", "__puus")
+        /**
+         * 登录成功特征键（v5.3.0 对齐 quark-auto-save 实战：__uid 为
+         * 有效 Cookie 的标志键；__pus/__puus 为会话键）。
+         */
+        val AUTH_COOKIE_KEYS = listOf("__uid", "__pus", "__puus")
     }
 }

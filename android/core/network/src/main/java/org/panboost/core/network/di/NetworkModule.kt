@@ -8,101 +8,178 @@ import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.panboost.core.domain.AccountRepository
+import org.panboost.core.domain.PanCatalog
+import org.panboost.core.logging.AppLog
 import org.panboost.core.network.QuarkApi
 import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
-import javax.inject.Qualifier
 import javax.inject.Singleton
 
 /**
- * 网络层 Hilt 装配（第 4 周）。
+ * 网络层 Hilt 装配（v5.3.0 拦截器泛化重写）。
  *
- * 单一 OkHttp（UA/Referer/Cookie 拦截器——每次请求从 CookieStore
- * 读最新值，登录后立即生效）+ Retrofit（BASE_URL 夸克云端）+
- * 下载专用 OkHttp（同样的头策略，直链下载走它——夸克直链校验
- * Referer，YunX 实锤）。
+ * v5.2.x 及之前的架构错误（用户实锤"问题依旧"+"不要写死夸克"）：
+ * - Cookie 查询域写死 pan.quark.cn/quark.cn，而 API 请求 host 是
+ *   drive-pc.quark.cn——RFC 6265 下应**按请求 host 查** getCookie，
+ *   才能拿到"会发给该 host 的全部 cookie"（含父域 .quark.cn 的
+ *   __puus/__uid/kps 等），查错域集合可能缺键（真机反复失败的
+ *   根因）。
+ * - 拦截器只服务夸克——UC 等同源网盘接入即坏。
+ *
+ * v5.3.0：**通用网盘 Cookie 拦截器**——按请求 host 反查 PanCatalog
+ * 网盘域（任意网盘自动工作）；Cookie 三层供给：
+ * 1. WebView 全局 Cookie 罐实时读（按请求 host + 该网盘全部域，
+ *    登录后一切轮换自动反映）
+ * 2. 持久快照合并（手动粘贴兜底；同键实时值优先）
+ * 3. 响应 Set-Cookie 写回罐+快照（保活闭环）
  */
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
     /**
-     * 夸克 API 头策略 + Set-Cookie 保活（v5.1.0：401 根治）。
+     * 通用网盘 Cookie 拦截器（v5.3.0：网盘无关）。
      *
-     * v3.2.8 drive._merge_set_cookie 的原生等价：__puus/__pus 约
-     * 3 小时过期（直链签名校验关键字段），每次 API 响应的
-     * Set-Cookie 合并回 CookieStore 持久化——登录态持续保活。
-     * 漏掉这段是 v5.0.0 网盘浏览 401 的根因（Cookie 过期）。
+     * - host 匹配：请求 host 的任意后缀 == PanCatalog 某网盘的某域
+     * - Cookie 供给：该网盘全部域的 WebView 罐实时值（按域逐个查，
+     *   覆盖种在任何 host/domain 的键）+ 快照兜底合并
+     * - 保活：响应 Set-Cookie 合并回罐与快照
+     * - UA/Referer 仅对夸克系（clouddrive API 需要 UA=夸克客户端）
      */
-    private class QuarkHeaderInterceptor(
+    private class PanCookieInterceptor(
         private val accounts: AccountRepository,
-        private val appLog: org.panboost.core.logging.AppLog,
+        private val appLog: AppLog,
     ) : Interceptor {
+
         override fun intercept(chain: Interceptor.Chain): Response {
-            val builder: Request.Builder = chain.request().newBuilder()
-                .header("User-Agent", QuarkApi.CLIENT_UA)
-                .header("Referer", QuarkApi.REFERER)
-                .header("Origin", "https://pan.quark.cn")
-            // v5.2.1：Cookie 改实时读 WebView 全局 Cookie 罐（根治
-            // "登录 3 秒即失效"）——快照是死值，__puus 登录后立即
-            // 轮换且每次响应都刷新；实时读 CookieManager 一切轮换
-            // 自动反映（CookieManager 方法线程安全，可 IO 线程调）
-            val old = liveQuarkCookie()
-            if (old.isNotEmpty()) builder.header("Cookie", old)
+            val request = chain.request()
+            val host = request.url.host
+            val pan = PanCatalog.all.firstOrNull { pan ->
+                pan.domains.any { host == it || host.endsWith(".$it") }
+            }
+
+            val builder = request.newBuilder()
+            var snapshot = ""
+            if (pan != null) {
+                if (pan.key == "quark") {
+                    // 夸克 clouddrive API：客户端 UA + Referer（quark-auto-save 实战规格）
+                    builder.header("User-Agent", QuarkApi.CLIENT_UA)
+                        .header("Referer", QuarkApi.REFERER)
+                        .header("Origin", "https://pan.quark.cn")
+                }
+                snapshot = accounts.getCookie(pan.key).orEmpty()
+                val live = liveCookie(pan, host)
+                val merged = mergeCookie(live, snapshot)
+                if (merged.isNotBlank()) {
+                    builder.header("Cookie", merged)
+                    appLog.info(
+                        "net",
+                        "${request.method} ${request.url.encodedPath.take(56)}" +
+                                " [${pan.key}] cookie 实时${live.length}/快照${snapshot.length}",
+                    )
+                } else {
+                    appLog.warn(
+                        "net",
+                        "${request.method} ${request.url.encodedPath.take(56)}" +
+                                " [${pan.key}] 无 Cookie（未登录或已失效）",
+                    )
+                }
+            }
+
             val started = System.currentTimeMillis()
             val resp = chain.proceed(builder.build())
-            // v5.2.0：全链路请求日志（日志屏此前"不记录"的根因——网络层零日志）
             appLog.info(
                 "net",
-                "${chain.request().method} ${chain.request().url.encodedPath.take(60)}"
-                        + " → ${resp.code}（${System.currentTimeMillis() - started}ms）",
+                "${request.method} ${request.url.encodedPath.take(56)} → ${resp.code}" +
+                        "（${System.currentTimeMillis() - started}ms）",
             )
-            // Set-Cookie 合并保活（新值覆盖同键旧值）
-            try {
-                var merged = old
-                var renewed = 0
-                for (kv in resp.headers("Set-Cookie")) {
-                    val part = kv.substringBefore(";")
-                    val k = part.substringBefore("=").trim()
-                    val v = part.substringAfter("=").trim()
-                    if (k.isNotEmpty() && v.isNotEmpty()) {
-                        merged = setKv(merged, k, v)
-                        renewed += 1
+
+            // Set-Cookie 保活（写回罐 + 快照）
+            if (pan != null) {
+                try {
+                    val setCookies = resp.headers("Set-Cookie")
+                    if (setCookies.isNotEmpty()) {
+                        var merged = snapshot
+                        var renewed = 0
+                        for (kv in setCookies) {
+                            val part = kv.substringBefore(";")
+                            val k = part.substringBefore("=").trim()
+                            val v = part.substringAfter("=").trim()
+                            if (k.isNotEmpty() && v.isNotEmpty()) {
+                                merged = setKv(merged, k, v)
+                                renewed++
+                            }
+                        }
+                        if (merged.isNotBlank()) {
+                            writeBack(pan, merged)
+                            accounts.setCookie(pan.key, merged)
+                            appLog.info("net", "[${pan.key}] Cookie 保活：续期 $renewed 个键")
+                        }
                     }
+                } catch (_: Exception) {
                 }
-                if (merged != old && merged.isNotEmpty()) {
-                    // v5.2.1：保活写回 WebView 罐（下次请求实时取到）
-                    writeBackQuarkCookie(merged)
-                    accounts.setCookie("quark", merged)
-                    appLog.info("net", "Cookie 保活：续期 $renewed 个键")
-                }
-            } catch (_: Exception) {
             }
             return resp
         }
 
-        /** 实时读 WebView 全局 Cookie 罐（quark.cn 域树，登录态永远新鲜）。 */
-        private fun liveQuarkCookie(): String = try {
-            val cm = android.webkit.CookieManager.getInstance()
-            listOf("https://pan.quark.cn", "https://quark.cn")
-                .mapNotNull { cm.getCookie(it) }
-                .joinToString("; ")
-                .ifEmpty { "" }
-        } catch (_: Exception) {
-            ""
+        /** 实时读 WebView 罐：按请求 host + 该网盘全部域逐个查询合并。 */
+        private fun liveCookie(pan: org.panboost.core.domain.PanInfo, requestHost: String): String {
+            return try {
+                val cm = android.webkit.CookieManager.getInstance()
+                val hosts = (listOf(requestHost) + pan.domains + pan.loginUrl
+                    .removePrefix("https://").removePrefix("http://")
+                    .substringBefore("/"))
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                val kv = linkedMapOf<String, String>()
+                for (h in hosts) {
+                    val raw = try {
+                        cm.getCookie("https://$h")
+                    } catch (_: Exception) {
+                        null
+                    } ?: continue
+                    for (c in raw.split(";")) {
+                        val k = c.substringBefore("=").trim()
+                        val v = c.substringAfter("=").trim()
+                        if (k.isNotEmpty() && v.isNotEmpty()) kv[k] = v
+                    }
+                }
+                kv.entries.joinToString("; ") { "${it.key}=${it.value}" }
+            } catch (_: Exception) {
+                ""
+            }
         }
 
-        /** 响应 Set-Cookie 写回 WebView 罐（保活闭环）。 */
-        private fun writeBackQuarkCookie(merged: String) {
+        /** 快照合并（live 优先，快照补缺）。 */
+        private fun mergeCookie(live: String, snapshot: String): String {
+            if (live.isBlank()) return snapshot.trim()
+            if (snapshot.isBlank()) return live
+            val kv = linkedMapOf<String, String>()
+            for (c in snapshot.split(";")) {
+                val k = c.substringBefore("=").trim()
+                if (k.isNotEmpty()) kv[k] = c.substringAfter("=").trim()
+            }
+            for (c in live.split(";")) {
+                val k = c.substringBefore("=").trim()
+                if (k.isNotEmpty()) kv[k] = c.substringAfter("=").trim()
+            }
+            return kv.entries.joinToString("; ") { "${it.key}=${it.value}" }
+        }
+
+        /** Set-Cookie 写回 WebView 罐（保活闭环）。 */
+        private fun writeBack(pan: org.panboost.core.domain.PanInfo, merged: String) {
             try {
                 val cm = android.webkit.CookieManager.getInstance()
-                for (kv in merged.split("; ")) {
-                    val k = kv.substringBefore("=").trim()
+                for (c in merged.split("; ")) {
+                    val k = c.substringBefore("=").trim()
                     if (k.isNotEmpty()) {
-                        cm.setCookie("https://pan.quark.cn", kv)
+                        for (d in pan.domains) {
+                            cm.setCookie("https://$d", c)
+                        }
                     }
                 }
                 cm.flush()
@@ -125,14 +202,13 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(
         accounts: AccountRepository,
-        appLog: org.panboost.core.logging.AppLog,
+        appLog: AppLog,
     ): OkHttpClient =
         OkHttpClient.Builder()
-            .addInterceptor(QuarkHeaderInterceptor(accounts, appLog))
+            .addInterceptor(PanCookieInterceptor(accounts, appLog))
             .addInterceptor(org.panboost.core.network.PersonaInterceptor())
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
-            // v5.1.0：512/1024 线程并发前置条件（默认 64 会饿死高并发）
             .dispatcher(
                 okhttp3.Dispatcher().apply {
                     maxRequests = 1024
@@ -157,7 +233,7 @@ object NetworkModule {
     fun provideQuarkApi(retrofit: Retrofit): QuarkApi =
         retrofit.create(QuarkApi::class.java)
 
-    // v4.2.0：分享链接解析 API（同一 Retrofit/OkHttp/拦截器链）
+    // v5.2.0：分享链接解析 API（同一 Retrofit/OkHttp/拦截器链）
     @Provides
     @Singleton
     fun provideQuarkShareApi(retrofit: Retrofit): org.panboost.core.network.QuarkShareApi =

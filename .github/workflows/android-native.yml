@@ -42,7 +42,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.2.1-android.apk; done
+          for f in *.apk; do mv "$f" panboost-5.3.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -55,12 +55,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.2.1——"登录3秒即失效"根治。' '根因（架构级）：登录屏把 WebView 采集的 Cookie 存成快照供 API 使用——但夸克 __puus 是会话签名、登录后会立即轮换且每次响应都刷新，死快照 3 秒后就是废值；且"已完成登录"按钮只校验 Cookie 非空（无关跟踪 Cookie 也算数）。修复：①Cookie 改实时读——API 拦截器每次请求直接读 WebView 全局 Cookie 罐（登录后一切轮换/续期自动反映，永不过时）；Set-Cookie 保活同步写回该罐形成闭环；②手动登录按钮严格校验特征键（__pus/__puus 全命中才保存，否则红字提示"未检测到完整登录凭证"）。' '既有：三网盘分享/网盘选择条/全链路日志/512~1024 线程/防风控/历史。' > "$NOTES_FILE"
-          TAG="android-v5.2.1"
+          printf '%s\n' 'PanBoost v5.3.0——联网研究重制版（夸克 Cookie 机制彻底对齐开源实战）。' '本轮先彻底研究了 3072★成熟项目 quark-auto-save 的实战代码，实锤四个差距并全部修复：①Cookie 查询域纠正——此前按 pan.quark.cn 查询，而 API 请求 host 是 drive-pc.quark.cn；RFC 6265 语义下必须按请求 host 查询才能拿到会发给该 host 的全部 Cookie（含父域 .quark.cn 的 __puus/__uid/kps 等），查错域集合缺键正是反复失败的根因；②API 参数补齐——file/sort 补 uc_param_str/_fetch_total/_fetch_sub_dirs/_fetch_full_path/fetch_risk_file_name，download 补 uc_param_str（与实战逐参数对齐）；③客户端 UA 升级 3.14.2/Chrome112/Electron24（旧 2.5.20 可能已过风控期）；④登录校验特征键补 __uid（实战项目的有效 Cookie 标志）。' '架构泛化：拦截器重写为通用网盘 Cookie 拦截器——按请求 host 自动匹配网盘目录（任意网盘自动工作，不再写死夸克），Cookie 三层供给（WebView 实时罐按 host+全域查询 → 快照兜底合并 → Set-Cookie 写回闭环）。' '诊断升级：每次请求记录 Cookie 来源（实时/快照长度），无 Cookie 时告警——日志屏可直接看到 Cookie 供给状态。' > "$NOTES_FILE"
+          TAG="android-v5.3.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.2.1（登录3秒失效根治）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.3.0（联网研究重制版）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true
