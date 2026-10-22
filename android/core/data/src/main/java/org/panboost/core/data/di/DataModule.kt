@@ -4,6 +4,7 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import org.panboost.core.data.DownloadHistoryStore
 import org.panboost.core.data.DownloadRepositoryImpl
 import org.panboost.core.domain.DownloadRepository
 import javax.inject.Singleton
