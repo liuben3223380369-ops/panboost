@@ -26,15 +26,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.panboost.core.domain.PanCatalog
 
 /**
- * 通用网盘登录屏（v4.3.0：数据驱动的 18 网盘登录）。
+ * 通用网盘登录屏（v5.1.1 采集域修正）。
  *
- * 路由参数 panKey 决定登录页 URL / Cookie 采集域 / 特征键
- * （PanCatalog）。WebView onPageFinished 检查特征键命中 →
- * 自动保存返回；"我已完成登录"按钮兜底（Cookie 存在即保存——
- * authKeys 空的网盘走此路径记"未验证"，v3.2.8 同语义）。
+ * v5.1.0 及之前的 bug：Cookie 采集域用 PanCatalog domains.first()
+ * （夸克 = quark.cn），而 __puus/__pus 实际种在登录页 host
+ * （pan.quark.cn）——采到的 Cookie 不全，带去 API 即 401/空列表。
+ * v5.1.1：多域合并采集（登录页 host 优先 + PanCatalog 全部域），
+ * 同键以更精确域（后采集）覆盖。
  */
 @Composable
 fun LoginScreen(
@@ -49,11 +49,18 @@ fun LoginScreen(
     LoginScreenContent(
         panName = viewModel.pan.name,
         loginUrl = viewModel.pan.loginUrl,
-        cookieDomain = "https://${viewModel.pan.domains.first()}",
+        collectDomains = viewModel.pan.domains + loginHost(viewModel.pan.loginUrl),
         authKeys = viewModel.pan.authKeys,
         loading = uiState.loading,
         onCookie = viewModel::onLoginCookie,
     )
+}
+
+/** 登录页 host（夸克 = pan.quark.cn）。 */
+private fun loginHost(loginUrl: String): String = try {
+    android.net.Uri.parse(loginUrl).host ?: ""
+} catch (_: Exception) {
+    ""
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -62,7 +69,7 @@ fun LoginScreen(
 internal fun LoginScreenContent(
     panName: String,
     loginUrl: String,
-    cookieDomain: String,
+    collectDomains: List<String>,
     authKeys: List<String>,
     loading: Boolean,
     onCookie: (String) -> Unit,
@@ -97,11 +104,12 @@ internal fun LoginScreenContent(
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
-                                val cookie = CookieManager.getInstance()
-                                    .getCookie(cookieDomain) ?: return
-                                if (authKeys.isNotEmpty() && authKeys.all {
+                                val cookie = collectCookie(collectDomains)
+                                if (authKeys.isNotEmpty() && cookie != null &&
+                                    authKeys.all {
                                         cookie.contains("$it=", ignoreCase = true)
-                                    }) {
+                                    }
+                                ) {
                                     onCookie(cookie)
                                 }
                             }
@@ -114,15 +122,7 @@ internal fun LoginScreenContent(
             )
             Button(
                 onClick = {
-                    webView?.let { view ->
-                        val cookie = CookieManager.getInstance().getCookie(cookieDomain)
-                        if (cookie != null &&
-                            (authKeys.isEmpty() || view.url.orEmpty()
-                                .contains(cookieDomain.removePrefix("https://")))
-                        ) {
-                            onCookie(cookie)
-                        }
-                    }
+                    collectCookie(collectDomains)?.let { onCookie(it) }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -132,6 +132,33 @@ internal fun LoginScreenContent(
             }
         }
     }
+}
+
+/**
+ * 多域 Cookie 合并采集（v5.1.1）。
+ *
+ * 顺序：PanCatalog domains 先、登录页 host 最后（更精确域的值
+ * 覆盖同键）——夸克 __puus 种在 pan.quark.cn，只查 quark.cn 会
+ * 拿不全（v5.1.0 空 Cookie 带去 API 即 401/空列表的根因）。
+ */
+private fun collectCookie(domains: List<String>): String? {
+    val cm = CookieManager.getInstance()
+    val merged = linkedMapOf<String, String>()
+    for (d in domains) {
+        if (d.isBlank()) continue
+        val raw = try {
+            cm.getCookie("https://$d")
+        } catch (_: Exception) {
+            null
+        } ?: continue
+        for (kv in raw.split(";")) {
+            val k = kv.substringBefore("=").trim()
+            val v = kv.substringAfter("=").trim()
+            if (k.isNotEmpty() && v.isNotEmpty()) merged[k] = v
+        }
+    }
+    return if (merged.isEmpty()) null
+        else merged.entries.joinToString("; ") { "${it.key}=${it.value}" }
 }
 
 private val DESKTOP_UA =
@@ -145,7 +172,7 @@ private fun LoginScreenPreview() {
         LoginScreenContent(
             panName = "夸克网盘",
             loginUrl = "https://pan.quark.cn/",
-            cookieDomain = "https://quark.cn",
+            collectDomains = listOf("quark.cn", "pan.quark.cn"),
             authKeys = listOf("__pus", "__puus"),
             loading = false,
             onCookie = {},

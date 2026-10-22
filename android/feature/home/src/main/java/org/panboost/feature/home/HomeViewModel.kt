@@ -16,13 +16,15 @@ import java.util.UUID
 import javax.inject.Inject
 
 /**
- * 首屏 ViewModel（第 4 周链路核心：浏览 → 下载）。
+ * 首屏 ViewModel（v5.1.1 生命周期刷新）。
  *
- * - OpenDir：push 面包屑 + 拉子目录列表（整列替换）
- * - DownloadFile：取直链（QuarkDriveRepository）→ enqueue 真实
- *   下载任务（UrlDownloadWorker，OkHttp 流式）→ snackbar 引导
- *   去下载屏；失败（Cookie 过期等）snackbar 展示错误
- * - 防连点：downloading 标记在途时忽略再次点击
+ * v5.1.0 及之前的结构性缺陷：init 只在 ViewModel 创建时加载一次
+ * ——用户先开网盘 Tab（未登录→失败）→去账号页登录→回 Tab，
+ * 同一实例不再刷新，列表永空。修复：
+ * - Refresh 由 HomeScreen 的 ON_RESUME 生命周期事件触发（每次
+ *   Tab 回前台都重拉；loading 中自动跳过防抖）
+ * - 加载失败写入持久 error（UI 显示错误卡片+重试按钮，不再只
+ *   闪一次 Snackbar）
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -42,7 +44,7 @@ class HomeViewModel @Inject constructor(
             HomeIntent.Refresh -> load(_uiState.value.currentFid)
             is HomeIntent.OpenDir -> openDir(intent.dir)
             HomeIntent.NavigateUp -> navigateUp()
-            is HomeIntent.DownloadFile ->downloadFile(intent.file)
+            is HomeIntent.DownloadFile -> downloadFile(intent.file)
             HomeIntent.SnackbarShown -> _uiState.update {
                 it.copy(snackbar = null)
             }
@@ -50,14 +52,19 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun load(fid: String) {
-        _uiState.update { it.copy(loading = true) }
+        if (_uiState.value.loading) return  // 防抖
+        _uiState.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             try {
                 val files = driveRepository.listFiles(fid)
                 _uiState.update { it.copy(loading = false, files = files) }
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(loading = false, snackbar = "加载失败：${e.message?.take(60)}")
+                    it.copy(
+                        loading = false,
+                        error = e.message?.take(120)
+                            ?: "加载失败（${e.javaClass.simpleName}）",
+                    )
                 }
             }
         }

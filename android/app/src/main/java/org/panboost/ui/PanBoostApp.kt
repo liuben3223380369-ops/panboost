@@ -81,6 +81,7 @@ fun PanBoostApp() {
             composable(TAB_HOME) {
                 HomeScreen(
                     onOpenDownload = { navController.navigate(TAB_DOWNLOAD) },
+                    onOpenAccounts = { navController.navigate(TAB_ACCOUNTS) },
                 )
             }
             composable(TAB_DOWNLOAD) {
