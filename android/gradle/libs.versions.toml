@@ -68,6 +68,8 @@ androidx-hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-com
 
 # 测试
 junit = { module = "junit:junit", version.ref = "junit" }
+# v5.4.1：unit test 的 org.json 真实实现（android.jar 是 Stub 会炸）
+org-json = { module = "org.json:json", version = "20240303" }
 androidx-test-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestJunit" }
 espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
 
