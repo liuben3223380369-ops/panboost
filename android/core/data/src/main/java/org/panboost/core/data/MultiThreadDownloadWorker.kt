@@ -43,6 +43,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted params: WorkerParameters,
     private val writer: MediaStoreDownloadsWriter,
+    private val appLog: org.panboost.core.logging.AppLog,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
@@ -58,6 +59,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             .coerceIn(1, MAX_THREADS)
 
         setForeground(createForegroundInfo(0, 0))
+        appLog.info("download", "开始：${fileName.take(40)}（${threads} 线程）")
 
         val client = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
@@ -79,6 +81,8 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         val block = (total + threads - 1) / threads
         val dir = File(appContext.cacheDir, "parts_${id}")
         dir.mkdirs()
+        val speedTracker = SpeedTracker()
+        val totalWritten = java.util.concurrent.atomic.AtomicLong(0)
 
         try {
             coroutineScope {
@@ -89,12 +93,15 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                             start = i * block,
                             endExclusive = minOf((i + 1) * block, total),
                             partFile = File(dir, "part$i"),
+                            speedTracker = speedTracker,
                             onProgress = { done, total2 ->
-                                // v4.1.0：suspend setProgress 经 suspend 回调上抛
+                                // v5.0.0：进度含滑动窗口速率（下载屏 MB/s 实时显示）
+                                val speed = speedTracker.rate()
                                 setProgress(
                                     androidx.work.workDataOf(
                                         MockDownloadWorker.KEY_BYTES to done,
-                                        MockDownloadWorker.KEY_TOTAL to total2,
+                                        MockDownloadWorker.KEY_TOTAL to total,
+                                        KEY_SPEED to speed,
                                     )
                                 )
                             },
@@ -125,10 +132,12 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 output.abort()
                 throw e
             }
+            appLog.info("download", "完成：$fileName（${fmt(speedTracker.rate())}/s）")
             return Result.success(
                 androidx.work.workDataOf(
                     MockDownloadWorker.KEY_BYTES to total,
                     MockDownloadWorker.KEY_TOTAL to total,
+                    KEY_SPEED to speedTracker.rate(),
                 )
             )
         } catch (e: Exception) {
@@ -171,6 +180,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         endExclusive: Long,
         partFile: File,
         onProgress: suspend (Long, Long) -> Unit,
+        speedTracker: SpeedTracker? = null,
     ) {
         if (start >= endExclusive) return
         if (partFile.length() == endExclusive - start) {
@@ -193,6 +203,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             }
         }
         onProgress(start + partFile.length(), 0)
+        speedTracker?.add(partFile.length())
     }
 
     /** 服务器不支持 Range 时的降级路径（单流）。 */
@@ -236,6 +247,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                                 androidx.work.workDataOf(
                                     MockDownloadWorker.KEY_BYTES to written,
                                     MockDownloadWorker.KEY_TOTAL to total,
+                                    KEY_SPEED to speedTracker.rate(),
                                 )
                             )
                         }
@@ -291,12 +303,45 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
     private data class ProbeInfo(val total: Long, val rangeOk: Boolean)
 
+    private fun fmt(bps: Long): String = when {
+        bps >= 1024 * 1024 -> "%.1fMB".format(bps / 1024f / 1024f)
+        bps >= 1024 -> "%dKB".format(bps / 1024)
+        else -> "${bps}B"
+    }
+
+    /** 滑动窗口速率（v5.0.0：下载屏实时 MB/s）。 */
+    private class SpeedTracker {
+        private val samples = ArrayDeque<Pair<Long, Long>>(16) // (ts, bytes)
+
+        fun add(deltaBytes: Long) {
+            synchronized(samples) {
+                val now = System.currentTimeMillis()
+                val last = samples.lastOrNull()?.second ?: 0L
+                samples.addLast(now to last + deltaBytes)
+                while (samples.size > 16) samples.removeFirst()
+                // 窗口 5s 裁剪
+                while (samples.size > 2 &&
+                    now - samples.first().first > 5_000
+                ) samples.removeFirst()
+            }
+        }
+
+        fun rate(): Long = synchronized(samples) {
+            val first = samples.firstOrNull() ?: return 0L
+            val last = samples.lastOrNull() ?: return 0L
+            val dt = (last.first - first.first) / 1000.0
+            if (dt < 0.5) return 0L
+            ((last.second - first.second) / dt).toLong()
+        }
+    }
+
     companion object {
         const val KEY_URL = "url"
         const val KEY_REFERER = "referer"
         const val KEY_THREADS = "threads"
         const val DEFAULT_THREADS = 8
         const val MAX_THREADS = 16
+        const val KEY_SPEED = "speed"
 
         private const val CHANNEL_ID = "panboost_download"
         private const val NOTIF_ID = 1001

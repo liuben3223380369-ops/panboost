@@ -36,6 +36,8 @@ import javax.inject.Singleton
 @Singleton
 class DownloadRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val history: DownloadHistoryStore,
+    private val appLog: org.panboost.core.logging.AppLog,
 ) : DownloadRepository {
 
     private val workManager: WorkManager
@@ -93,9 +95,47 @@ class DownloadRepositoryImpl @Inject constructor(
             .addTag(TAG)
             .build()
 
+    private val recordedIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     override fun observeAll(): Flow<List<DownloadTask>> =
         workManager.getWorkInfosByTagFlow(TAG)
-            .map { infos -> infos.map(::toTask).sortedByDescending { it.id } }
+            .map { infos ->
+                infos.map(::toTask)
+                    .sortedByDescending { it.id }
+                    .also { tasks -> tasks.forEach(::recordHistoryIfNeeded) }
+            }
+
+    /** 终态落史（v5.0.0：v3.2.8 add_history 语义——完成/失败/取消各一条，幂等）。 */
+    private fun recordHistoryIfNeeded(task: DownloadTask) {
+        val terminal = task.status == DownloadStatus.SUCCEEDED
+                || task.status == DownloadStatus.FAILED
+                || task.status == DownloadStatus.CANCELLED
+        if (!terminal || !recordedIds.add(task.id)) return
+        history.add(
+            org.panboost.core.domain.DownloadHistoryEntry(
+                ts = System.currentTimeMillis(),
+                url = task.url,
+                name = task.fileName,
+                size = task.totalBytes,
+                status = when (task.status) {
+                    DownloadStatus.SUCCEEDED -> "完成"
+                    DownloadStatus.FAILED -> "失败"
+                    else -> "已取消"
+                },
+                speed = lastSpeeds.remove(task.id) ?: 0L,
+            )
+        )
+        appLog.info(
+            "history",
+            "${task.fileName.take(40)} → ${when (task.status) {
+                DownloadStatus.SUCCEEDED -> "完成"
+                DownloadStatus.FAILED -> "失败"
+                else -> "取消"
+            }}"
+        )
+    }
+
+    private val lastSpeeds = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     override fun cancel(taskId: String) {
         workManager.cancelUniqueWork(uniqueName(taskId))
@@ -129,6 +169,10 @@ class DownloadRepositoryImpl @Inject constructor(
             info.progress.getLong(MockDownloadWorker.KEY_TOTAL, 0L),
         ).let { if (it > 0) it else MockDownloadWorker.DEFAULT_TOTAL }
         val bytes = info.progress.getLong(MockDownloadWorker.KEY_BYTES, 0L)
+        val speed = info.progress.getLong(
+            MultiThreadDownloadWorker.KEY_SPEED, 0L
+        )
+        if (speed > 0) lastSpeeds[info.id.toString()] = speed
         val status = when (info.state) {
             WorkInfo.State.ENQUEUED -> DownloadStatus.QUEUED
             WorkInfo.State.RUNNING -> DownloadStatus.RUNNING
@@ -146,6 +190,7 @@ class DownloadRepositoryImpl @Inject constructor(
             downloadedBytes = if (status == DownloadStatus.SUCCEEDED) total else bytes,
             status = status,
             progress = if (total > 0) bytes.toFloat() / total else 0f,
+            speedBps = speed,
         )
     }
 

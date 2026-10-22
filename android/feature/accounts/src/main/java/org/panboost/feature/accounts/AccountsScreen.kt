@@ -21,6 +21,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,6 +47,7 @@ import org.panboost.core.domain.PanCatalog
 @Composable
 fun AccountsScreen(
     onLoginPan: (String) -> Unit,
+    onOpenLogs: () -> Unit = {},
     viewModel: AccountsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -60,6 +62,7 @@ fun AccountsScreen(
         uiState = uiState,
         onIntent = viewModel::onIntent,
         onLoginPan = onLoginPan,
+        onOpenLogs = onOpenLogs,
         snackbarHostState = snackbarHostState,
     )
 }
@@ -70,11 +73,17 @@ internal fun AccountsScreenContent(
     uiState: AccountsUiState,
     onIntent: (AccountsIntent) -> Unit,
     onLoginPan: (String) -> Unit,
+    onOpenLogs: () -> Unit = {},
     snackbarHostState: SnackbarHostState,
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("账号（已验证 ${uiState.verifiedCount}）") })
+            TopAppBar(
+                title = { Text("账号（已验证 ${uiState.verifiedCount}）") },
+                actions = {
+                    TextButton(onClick = onOpenLogs) { Text("日志") }
+                },
+            )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->

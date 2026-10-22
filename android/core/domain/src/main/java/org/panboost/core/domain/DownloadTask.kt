@@ -16,6 +16,8 @@ data class DownloadTask(
     val downloadedBytes: Long = 0L,
     val status: DownloadStatus = DownloadStatus.QUEUED,
     val progress: Float = 0f,
+    /** 实时速率 B/s（v5.0.0：Worker 滑动窗口）。 */
+    val speedBps: Long = 0L,
 )
 
 /** 任务生命周期。 */

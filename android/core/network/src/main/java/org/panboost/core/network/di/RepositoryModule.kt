@@ -9,6 +9,7 @@ import org.panboost.core.domain.DriveRepository
 import org.panboost.core.domain.ShareRepository
 import org.panboost.core.network.MultiPanCookieStore
 import org.panboost.core.network.QuarkDriveRepository
+import org.panboost.core.network.CompositeShareRepository
 import org.panboost.core.network.QuarkShareRepository
 import javax.inject.Singleton
 
@@ -23,11 +24,11 @@ abstract class RepositoryModule {
         impl: QuarkDriveRepository,
     ): DriveRepository
 
-    // v4.2.0：分享链接解析仓库
+    // v5.0.0：分享链接解析分发（夸克/123/蓝奏）
     @Binds
     @Singleton
     abstract fun bindShareRepository(
-        impl: QuarkShareRepository,
+        impl: CompositeShareRepository,
     ): ShareRepository
 
     // v4.3.0：多网盘账号仓库（CookieStore 多网盘化）
@@ -36,4 +37,11 @@ abstract class RepositoryModule {
     abstract fun bindAccountRepository(
         impl: MultiPanCookieStore,
     ): AccountRepository
+
+    // v5.0.0：下载历史仓库
+    @Binds
+    @Singleton
+    abstract fun bindDownloadHistoryRepository(
+        impl: org.panboost.core.data.DownloadHistoryStore,
+    ): org.panboost.core.domain.DownloadHistoryRepository
 }

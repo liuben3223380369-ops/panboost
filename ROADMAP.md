@@ -22,9 +22,9 @@
 
 | # | v3.2.8 功能 | v4.1.1 现状 | 回补方案 | 状态 |
 |---|---|---|---|---|
-| 1 | **分享链接解析**：粘贴夸克分享链接 → 文件列表勾选（全选/单选）→ 批量加速下载 | ✅ 夸克 | :feature:share + QuarkShareRepository（token/detail/download 三步流） | ✅ v4.2.0 |
+| 1 | **分享链接解析**（夸克/123/蓝奏三网盘自动分发）→ 勾选批量下载 | ✅ 三网盘 | CompositeShareRepository 分发 | ✅ v5.0.0 |
 | 2 | **剪贴板识别**：复制分享链接回 App 自动填入 | ✅ | 进分享屏 LaunchedEffect 检测（不覆盖已输入） | ✅ v4.2.0 |
-| 3 | **URL 直链高级下载**：粘贴任意直链（含 UA 回退/挑战 Cookie 自动通过） | ❌ | download 屏加"新建下载"输入框（线程数选择 auto/8/16/32） | 待做 |
+| 3 | **URL 直链高级下载**：粘贴任意直链 | ✅ 基础（8 线程分块） | UA 回退/挑战 Cookie 后续 | 🟡 v5.0.0 |
 | 4 | **网盘多账号管理**：账号页账簿（已登录徽标/删除/重新登录） | ✅ | :feature:accounts（18 网盘宫格/徽标/删除）+ MultiPanCookieStore | ✅ v4.3.0 |
 | 5 | **多网盘支持**（v3.2.8 = 18 家） | 🟡 清单/登录/粘贴已通（18 家可登录存 Cookie）；浏览下载仅夸克 | UC/百度等逐家接浏览下载 API（UC 与夸克同源优先） | 待做 |
 | 6 | **手动粘贴 Cookie 路径**（WebView 登录失败时的兜底） | ✅ | 账号页粘贴对话框（保存即验证徽标） | ✅ v4.3.0 |
@@ -34,9 +34,9 @@
 | # | 功能 | 现状 | 方案 | 状态 |
 |---|---|---|---|---|
 | 7 | **全局崩溃捕获**（crash-*.log 可取回） | ❌ | CrashReporter（UncaughtExceptionHandler → 外部私有目录） | ✅ v4.1.1 |
-| 8 | **应用日志屏**（app-*.log 按天轮转 + 环形缓冲） | ❌ | :core:logging（ Timber 式 + 文件轮转）+ :feature:logs | 待做 |
-| 9 | **下载历史**（永久记录/开关/失败重跑） | ❌ | Room（或 DataStore JSON）+ :feature:history | 待做 |
-| 10 | **实时速度显示**（KB/s / MB/s） | ❌ 只有字节 | Worker 进度含速率（滑动窗口） | 待做 |
+| 8 | **应用日志屏**（app-*.log 按天轮转 + 环形缓冲） | ✅ | :core:logging + :feature:logs（500 条环+7 天轮转） | ✅ v5.0.0 |
+| 9 | **下载历史**（永久记录/开关/失败重跑） | ✅ | DownloadHistoryStore（JSON 200 条）+ :feature:history | ✅ v5.0.0 |
+| 10 | **实时速度显示**（KB/s / MB/s） | ✅ | Worker SpeedTracker 滑动窗口 | ✅ v5.0.0 |
 
 ### P2 —— 引擎能力（Kivy 引擎 panboost.py 对标）
 
@@ -51,7 +51,7 @@
 
 | # | 功能 | 现状 | 方案 | 状态 |
 |---|---|---|---|---|
-| 15 | 五屏导航（首页宫格/下载/账号/历史/日志） | 三屏 | 底部 NavigationBar（M3）+ 徽标 | 待做 |
+| 15 | 五屏导航（首页宫格/下载/账号/历史/日志） | ✅ 五 Tab + logs 路由 | M3 NavigationBar | ✅ v5.0.0 |
 | 16 | 下载完成通知点击跳转 | 前台通知无内容 Intent | PendingIntent → MainActivity 深链 download 屏 | 待做 |
 
 ## 架构不变量（回补时必须守住）

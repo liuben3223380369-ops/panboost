@@ -31,6 +31,8 @@ dependencies {
     implementation(project(":feature:download"))
     implementation(project(":feature:share"))
     implementation(project(":feature:accounts"))
+    implementation(project(":feature:history"))
+    implementation(project(":feature:logs"))
     implementation(project(":feature:login"))
     implementation(project(":feature:home"))
 

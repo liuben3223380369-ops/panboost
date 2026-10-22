@@ -103,7 +103,7 @@ internal fun ShareScreenContent(
             OutlinedTextField(
                 value = uiState.shareUrl,
                 onValueChange = { onIntent(ShareIntent.UrlChanged(it)) },
-                label = { Text("分享链接（粘贴夸克分享链接）") },
+                label = { Text("分享链接（夸克 / 123云盘 / 蓝奏云）") },
                 supportingText = { Text("提取码可写在链接里（?code=）或单独填写") },
                 singleLine = false,
                 maxLines = 3,

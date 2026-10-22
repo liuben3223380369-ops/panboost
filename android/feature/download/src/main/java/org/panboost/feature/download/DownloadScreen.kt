@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -68,6 +69,20 @@ internal fun DownloadScreenContent(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        OutlinedTextField(
+            value = uiState.urlInput,
+            onValueChange = { onIntent(DownloadIntent.UrlChanged(it)) },
+            label = { Text("粘贴下载直链（URL）开始多线程下载") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = { onIntent(DownloadIntent.StartUrlDownload) },
+            enabled = uiState.urlInput.startsWith("http"),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("开始下载")
+        }
         Button(
             onClick = { onIntent(DownloadIntent.StartMockDownload) },
             modifier = Modifier.fillMaxWidth(),
@@ -165,7 +180,7 @@ private fun TaskCard(
 private fun statusLine(task: DownloadTask): String = when (task.status) {
     DownloadStatus.QUEUED -> "排队中"
     DownloadStatus.RUNNING ->
-        "${fmt(task.downloadedBytes)} / ${fmt(task.totalBytes)}"
+        "${fmt(task.downloadedBytes)} / ${fmt(task.totalBytes)} · ${fmt(task.speedBps)}/s"
     DownloadStatus.SUCCEEDED -> "完成 · ${fmt(task.totalBytes)}"
     DownloadStatus.FAILED -> "失败"
     DownloadStatus.CANCELLED -> "已取消"

@@ -73,6 +73,23 @@ object NetworkModule {
     fun provideQuarkShareApi(retrofit: Retrofit): org.panboost.core.network.QuarkShareApi =
         retrofit.create(org.panboost.core.network.QuarkShareApi::class.java)
 
+    // v5.0.0：123 云盘分享 API（独立 baseUrl 的第二 Retrofit）
+    @Provides
+    @Singleton
+    @dagger.hilt.android.qualifiers.Named("pan123")
+    fun providePan123Retrofit(client: OkHttpClient): Retrofit =
+        Retrofit.Builder()
+            .baseUrl(org.panboost.core.network.Pan123ShareApi.BASE_URL)
+            .client(client)
+            .build()
+
+    @Provides
+    @Singleton
+    fun providePan123ShareApi(
+        @dagger.hilt.android.qualifiers.Named("pan123") retrofit: Retrofit,
+    ): org.panboost.core.network.Pan123ShareApi =
+        retrofit.create(org.panboost.core.network.Pan123ShareApi::class.java)
+
     /** 直链下载请求体工厂（JSON {"fids":[...]}）。 */
     @Provides
     @Singleton

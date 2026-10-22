@@ -13,6 +13,7 @@ import org.panboost.core.domain.DownloadTask
  */
 data class DownloadUiState(
     val tasks: List<DownloadTask> = emptyList(),
+    val urlInput: String = "",
 ) {
     val activeCount: Int
         get() = tasks.count {
@@ -21,4 +22,13 @@ data class DownloadUiState(
 
     val hasTasks: Boolean
         get() = tasks.isNotEmpty()
+}
+
+/** 意图（v5.0.0 扩展：URL 直链下载）。 */
+sealed interface DownloadIntent {
+    data object StartMockDownload : DownloadIntent
+    data object StartUrlDownload : DownloadIntent
+    data class UrlChanged(val url: String) : DownloadIntent
+    data class Cancel(val taskId: String) : DownloadIntent
+    data class Retry(val taskId: String) : DownloadIntent
 }

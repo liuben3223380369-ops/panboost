@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.stateIn
 import org.panboost.core.domain.DownloadRepository
 import org.panboost.core.domain.DownloadStatus
@@ -32,20 +32,43 @@ class DownloadViewModel @Inject constructor(
 ) : ViewModel() {
 
     val uiState: StateFlow<DownloadUiState> =
-        downloadRepository.observeAll()
-            .map(::DownloadUiState)
+        kotlinx.coroutines.flow.combine(
+            downloadRepository.observeAll(),
+            _urlInput,
+        ) { tasks, url -> DownloadUiState(tasks = tasks, urlInput = url) }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = DownloadUiState(),
             )
 
+    private val _urlInput = MutableStateFlow("")
+
     fun onIntent(intent: DownloadIntent) {
         when (intent) {
             DownloadIntent.StartMockDownload -> startMockDownload()
+            DownloadIntent.StartUrlDownload -> startUrlDownload()
+            is DownloadIntent.UrlChanged -> _urlInput.value = intent.url
             is DownloadIntent.Cancel -> downloadRepository.cancel(intent.taskId)
             is DownloadIntent.Retry -> downloadRepository.retry(intent.taskId)
         }
+    }
+
+    /** URL 直链下载（v5.0.0：v3.2.8「高级下载」回补）。 */
+    private fun startUrlDownload() {
+        val url = _urlInput.value.trim()
+        if (!url.startsWith("http")) return
+        downloadRepository.enqueue(
+            DownloadTask(
+                id = UUID.randomUUID().toString(),
+                url = url,
+                fileName = url.substringAfterLast('/').substringBefore('?')
+                    .ifEmpty { "panboost_${url.hashCode().toUInt()}.bin" },
+                mimeType = "application/octet-stream",
+                totalBytes = 0L,
+            )
+        )
+        _urlInput.value = ""
     }
 
     private fun startMockDownload() {

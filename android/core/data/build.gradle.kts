@@ -11,6 +11,7 @@ android {
 dependencies {
     api(project(":core:domain"))
     api(project(":core:network"))
+    implementation(project(":core:logging"))
     api(libs.work.runtime.ktx)
 
     implementation(libs.okhttp)
