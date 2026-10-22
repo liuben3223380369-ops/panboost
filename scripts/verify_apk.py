@@ -39,6 +39,11 @@ ALLOWED_PERMISSIONS_PREFIXES = (
     "android.permission.POST_NOTIFICATIONS",
     "android.permission.ACCESS_NETWORK_STATE",
     "android.permission.WAKE_LOCK",
+    # 库组件合并进来的自身权限（WorkManager 持久化/诊断）
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+    "android.permission.BIND_JOB_SERVICE",
+    "android.permission.DUMP",
+    "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
 )
 
 CLASSISH = re.compile(r"^[a-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*\.[A-Z][A-Za-z0-9_]*$")
@@ -134,8 +139,14 @@ def main() -> int:
         if not s or s.startswith(("http://", "https://", "android.", "res/")):
             continue
         if CLASSISH.match(s):
-            # 形如包名+大写类的全限定名（activity/service/provider 等）
-            class_names.append(s)
+            # 只校验 App 自有组件类（org.panboost.*）——库内部类
+            # （androidx.* 等）被 R8 裁剪合法；intent action 字符串
+            # （含 .action. 段）与自定义权限声明（*_PERMISSION）跳过
+            if (s.startswith("org.panboost.")
+                    and ".action." not in s
+                    and "PERMISSION" not in s
+                    and "NOT_EXPORTED" not in s):
+                class_names.append(s)
     checked, bad = [], []
     for cn in class_names:
         dex_form = f"L{cn.replace('.', '/')};".encode()
@@ -144,7 +155,7 @@ def main() -> int:
         checked.append(cn)
     # 相对名（.MainActivity 形态）按 applicationId 解析
     for s in strings:
-        if RELATIVE.match(s):
+        if RELATIVE.match(s) and "PERMISSION" not in s:
             full = app_id + s
             dex_form = f"L{full.replace('.', '/')};".encode()
             if dex_form not in dex:
