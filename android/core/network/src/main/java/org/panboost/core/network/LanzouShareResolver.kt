@@ -44,8 +44,10 @@ class LanzouShareResolver @Inject constructor() : ShareRepository {
 
             // 1. 分享页 → iframe 下载入口
             val page = get("$url${if (passcode.isBlank()) "" else "?pwd=$passcode"}", headers)
-            val iframeMatch = Regex("""<iframe[^>]+src="([^"]*fn\?[^"]*)"""").find(page)
-                ?: Regex("""src="(/fn\?[^"]+)"""").find(page)
+            val iframeMatch = Regex(
+                """<iframe[^>]+src=.([^\s"]*fn\?[^\s"]*)."""
+            ).find(page)
+                ?: Regex("""src=.(/fn\?[^\s]+).""").find(page)
                 ?: throw IllegalStateException("未在分享页找到下载入口（链接可能失效或需要提取密码）")
             val iframeUrl = if (iframeMatch.groupValues[1].startsWith("http")) {
                 iframeMatch.groupValues[1]
@@ -56,7 +58,7 @@ class LanzouShareResolver @Inject constructor() : ShareRepository {
             // 2. 下载页 → sign
             val dlPage = get(iframeUrl, headers)
             val sign = Regex("""'sign'\s*:\s*'([^']+)'""").find(dlPage)?.groupValues?.get(1)
-                ?: Regex("""data-sign="([^"]+)"""").find(dlPage)?.groupValues?.get(1]
+                ?: Regex("""data-sign=.([A-Za-z0-9]+).""").find(dlPage)?.groupValues?.get(1)
                 ?: Regex("""sign\s*[:=]\s*'([A-Za-z0-9:%\-]+)'""").find(dlPage)?.groupValues?.get(1]
                 ?: throw IllegalStateException("未提取到签名参数")
 
