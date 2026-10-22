@@ -4,6 +4,13 @@
 > 原生栈（Kotlin + Compose）上等价或更强地回归。本表为逐项审计与
 > 回补计划；每项完成即划掉。
 
+## 事故记录
+
+- v4.0~v4.3 启动即闪退（2026-10-22 实锤根因）：namespace `org.panboost.app`
+  与源码包 `org.panboost` 失配 + Manifest 相对类名 `.MainActivity` →
+  解析出不存在的类。修复于 v4.3.1（全限定名 + scripts/verify_apk.py
+  启动链门禁——组件类必须在 dex 中逐一校验存在）。
+
 ## 审计基线
 
 - 旧版：v3.2.8（Kivy/p4a 终版，commit 46bae60）

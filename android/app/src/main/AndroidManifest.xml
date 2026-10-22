@@ -11,13 +11,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:name=".PanBoostApplication"
+        android:name="org.panboost.PanBoostApplication"
         android:label="PanBoost"
         android:supportsRtl="true"
         android:theme="@style/Theme.PanBoost">
 
         <activity
-            android:name=".MainActivity"
+            android:name="org.panboost.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.PanBoost">
             <intent-filter>

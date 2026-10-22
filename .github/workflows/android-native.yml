@@ -35,22 +35,13 @@ jobs:
       - name: Assemble release APK
         run: cd android && ./gradlew assembleRelease --stacktrace
 
-      - name: Smoke check APK
-        run: |
-          APK="android/app/build/outputs/apk/release/app-release.apk"
-          test -f "$APK" || { echo "::error::app-release.apk 未生成"; exit 1; }
-          ls -lh "$APK"
-          if strings "$APK" | grep -q "MANAGE_EXTERNAL_STORAGE"; then
-            echo "::error::检测到 MANAGE_EXTERNAL_STORAGE（应走 MediaStore 零权限路径）"
-            exit 1
-          fi
-          echo "零权限验证通过（无 MANAGE_EXTERNAL_STORAGE）"
-          python3 -c "import zipfile,sys; dex=zipfile.ZipFile('android/app/build/outputs/apk/release/app-release.apk').read('classes.dex'); keys=[b'drive-pc.quark.cn',b'pan.quark.cn',b'OkHttpClient',b'Lorg/panboost',b'MultiThreadDownloadWorker']; missing=[k.decode() for k in keys if k not in dex]; sys.exit('::error::R8 过度裁剪, 缺失: '+str(missing)) if missing else print('R8 保真校验通过')"
+      - name: Verify APK（启动链/R8 保真/零权限/结构 四合一门禁）
+        run: python3 scripts/verify_apk.py android/app/build/outputs/apk/release/app-release.apk
 
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-4.3.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-4.3.1-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -63,12 +54,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v4.3.0——多网盘账号管理版（P0 再下一城）。' 'v3.2.8 账簿原生回归（ROADMAP P0#4/#6 完成）：①18 网盘清单迁移（PanCatalog 数据驱动：夸克/UC/百度/阿里/天翼/移动/迅雷/123/蓝奏/坚果云/Google Drive/Dropbox/OneDrive/MEGA/pCloud/Box/Yandex）——账号页宫格、已登录徽标（特征 Cookie 键验证）/未验证徽标（登录态存 localStorage 的网盘保存 Cookie 供下载尝试）、删除账号。②通用登录页（路由参数选网盘，WebView 加载对应官方登录页自动检测特征 Cookie——新增网盘零代码）。③手动粘贴 Cookie（WebView 登录失败的兜底：浏览器登录后复制 Cookie 粘贴保存，v3.2.8 同款语义）。④底部四 Tab 导航（分享/网盘/下载/账号）。' '既有能力：分享链接勾选批量下载（8 线程分块+断点续传）、我的网盘浏览下载、进度/取消/重试、崩溃捕获。' '后续回补（ROADMAP）：UC/百度等逐家浏览下载接入、下载历史、日志屏。' '权限：网络+前台服务+通知，零存储权限。' '异常反馈请附 crash-*.txt。' > "$NOTES_FILE"
-          TAG="android-v4.3.0"
+          printf '%s\n' 'PanBoost v4.3.1——启动闪退根治版（根因终于实锤）。' 'v4.0~v4.3 全系"装上即闪"的根因：App 模块 namespace（org.panboost.app）与源码包名（org.panboost）不一致，而 Manifest 用相对类名 .MainActivity——系统解析成 org.panboost.app.MainActivity，这个类从第 1 周起就不存在，启动即 ClassNotFoundError。CI 只编译不启动所以四轮绿灯全没拦住，dex 字符串保真门禁查的是子串也放行了。' '本版双重修复：①Manifest 改全限定类名（org.panboost.MainActivity / org.panboost.PanBoostApplication）；②新增 scripts/verify_apk.py 四合一发布门禁——解 binary Manifest 字符串池，把每个组件类名（含相对名按包名解析）在 dex 中逐一校验存在，另含 R8 关键标记保真、权限白名单（拒绝任何存储权限）、结构完整性——"装上即闪"的残废包从此在 CI 层被拦截，本地也可直接运行该校验。' '功能面（v4.3.0 继承）：18 网盘账号管理（登录/徽标/删除/手动粘贴 Cookie）、分享链接勾选批量下载、多线程分块+断点续传+前台服务、崩溃捕获。' '若仍闪退请发 /Android/data/org.panboost.app/files/crashes/crash-*.txt。' > "$NOTES_FILE"
+          TAG="android-v4.3.1"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.3.0（多网盘账号管理）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.3.1（启动闪退根治）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true
