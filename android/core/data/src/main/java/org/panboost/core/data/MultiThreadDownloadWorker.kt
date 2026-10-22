@@ -54,6 +54,11 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
     override suspend fun getForegroundInfo(): ForegroundInfo =
         createForegroundInfo(0, 0)
 
+    /** 失败结果带 fileName（v5.3.2：历史记录不再回退 panboost.bin）。 */
+    private fun fail(fileName: String): Result = Result.failure(
+        androidx.work.workDataOf(MockDownloadWorker.KEY_FILE_NAME to fileName)
+    )
+
     override suspend fun doWork(): Result {
         val url = inputData.getString(KEY_URL) ?: return Result.failure()
         val fileName = inputData.getString(MockDownloadWorker.KEY_FILE_NAME)
@@ -65,6 +70,13 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
         setForeground(createForegroundInfo(0, 0))
         appLog.info("download", "开始：${fileName.take(40)}（${threadsChoice} 线程）")
+        // v5.3.2：进度首报带 fileName（历史/下载屏实时拿名，不再默认名）
+        setProgress(
+            androidx.work.workDataOf(
+                MockDownloadWorker.KEY_FILE_NAME to fileName,
+                MockDownloadWorker.KEY_TOTAL to 0L,
+            )
+        )
 
         val speedTracker = SpeedTracker()
 
@@ -79,11 +91,17 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             .connectionPool(okhttp3.ConnectionPool(MAX_THREADS, 30, TimeUnit.SECONDS))
             .build()
 
+        // v5.3.2：探测（HEAD 被拒 → GET Range 探测 → 全失败降级单流）
         val probe = probeRange(client, url, referer)
-            ?: run {
-                appLog.error("download", "探测失败：$fileName")
-                return Result.failure()
-            }
+        if (probe == null) {
+            appLog.warn(
+                "download",
+                "HEAD/Range 探测均失败（CDN 拒绝探测）——降级单流 GET：$fileName",
+            )
+            return downloadSingleStream(
+                client, url, fileName, mime, referer, speedTracker,
+            )
+        }
         if (!probe.rangeOk || probe.total <= 0) {
             return downloadSingleStream(
                 client, url, fileName, mime, referer, speedTracker,
@@ -133,7 +151,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             }
             if (isStopped) {
                 dir.deleteRecursively()
-                return Result.failure()
+                return fail(fileName)
             }
 
             // ---- 合并（块顺序拼接） ----
@@ -167,7 +185,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         } catch (e: Exception) {
             if (isStopped) dir.deleteRecursively()
             appLog.error("download", "失败：$fileName——${e.message?.take(60)}")
-            return Result.failure()
+            return fail(fileName)
         }
     }
 
@@ -321,13 +339,21 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         return bytes.get() * 1000 / ms
     }
 
-    /** HEAD 探测：total + Range 支持。 */
+    /**
+     * 探测：total + Range 支持（v5.3.2 双重探测）。
+     *
+     * 真机日志实锤：夸克 CDN 直链拒绝 HEAD（探测直接失败 → 整任务
+     * 失败）。修复：HEAD 失败后用 GET Range: bytes=0-0 探测——
+     * Content-Range: bytes 0-0/TOTAL 给出真实总长；两者都失败由
+     * 调用方降级单流（contentLength 兜底），下载永不因探测而死。
+     */
     private fun probeRange(
         client: OkHttpClient,
         url: String,
         referer: String,
     ): ProbeInfo? {
-        return try {
+        // 1. HEAD 探测
+        try {
             val request = Request.Builder()
                 .url(url)
                 .head()
@@ -335,14 +361,37 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 .header("User-Agent", QuarkApi.CLIENT_UA)
                 .build()
             client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val total = resp.header("Content-Length")?.toLongOrNull() ?: -1L
-                val rangeOk = resp.header("Accept-Ranges")?.contains("bytes") == true
-                ProbeInfo(total, rangeOk)
+                if (resp.isSuccessful) {
+                    val total = resp.header("Content-Length")?.toLongOrNull() ?: -1L
+                    val rangeOk = resp.header("Accept-Ranges")?.contains("bytes") == true
+                    if (total > 0) return ProbeInfo(total, rangeOk)
+                }
             }
-        } catch (e: Exception) {
-            null
+        } catch (_: Exception) {
         }
+        // 2. GET Range 探测（bytes=0-0，读 Content-Range）
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("Referer", referer)
+                .header("User-Agent", QuarkApi.CLIENT_UA)
+                .header("Range", "bytes=0-0")
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (resp.isSuccessful || resp.code == 206) {
+                    // Content-Range: bytes 0-0/1234567
+                    val cr = resp.header("Content-Range")
+                    val total = cr?.substringAfterLast("/")?.toLongOrNull() ?: -1L
+                    val rangeOk = resp.code == 206 || cr != null
+                    if (total > 0) return ProbeInfo(total, rangeOk)
+                    // 200 全量响应：Content-Length 即总长
+                    val cl = resp.header("Content-Length")?.toLongOrNull() ?: -1L
+                    if (cl > 0) return ProbeInfo(cl, false)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return null
     }
 
     /** 服务器不支持 Range 的降级单流。 */
@@ -362,11 +411,15 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         val response = try {
             client.newCall(request).execute()
         } catch (e: Exception) {
-            return Result.failure()
+            appLog.error("download", "单流请求异常：$fileName——${e.message?.take(60)}")
+            return fail(fileName)
         }
         response.use { resp ->
-            if (!resp.isSuccessful) return Result.failure()
-            val body = resp.body ?: return Result.failure()
+            if (!resp.isSuccessful) {
+                appLog.error("download", "单流 HTTP ${resp.code}：$fileName")
+                return fail(fileName)
+            }
+            val body = resp.body ?: return fail(fileName)
             val total = body.contentLength()
             val output = writer.create(fileName, mime)
             val buf = ByteArray(COPY_BUF)
@@ -376,7 +429,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                     while (true) {
                         if (isStopped) {
                             output.abort()
-                            return Result.failure()
+                            return fail(fileName)
                         }
                         val n = input.read(buf)
                         if (n < 0) break
@@ -392,6 +445,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 appLog.info("download", "完成（单流）：$fileName")
                 return Result.success(
                     androidx.work.workDataOf(
+                        MockDownloadWorker.KEY_FILE_NAME to fileName,
                         MockDownloadWorker.KEY_BYTES to written,
                         MockDownloadWorker.KEY_TOTAL to if (total > 0) total else written,
                         KEY_SPEED to (speedTracker?.rate() ?: 0L),
