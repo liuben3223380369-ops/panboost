@@ -30,6 +30,7 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":feature:download"))
     implementation(project(":feature:share"))
+    implementation(project(":feature:accounts"))
     implementation(project(":feature:login"))
     implementation(project(":feature:home"))
 

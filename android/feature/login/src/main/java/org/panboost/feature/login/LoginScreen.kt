@@ -26,20 +26,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.panboost.core.network.QuarkApi
-
+import org.panboost.core.domain.PanCatalog
 
 /**
- * 夸克登录屏（第 4 周：原生 WebView）。
+ * 通用网盘登录屏（v4.3.0：数据驱动的 18 网盘登录）。
  *
- * 原生 AndroidView+WebView 是官方成熟路径（无 Kivy 时代的
- * Dialog 时序/SDL 线程/双 Activity 黑屏坑——那些全是 Python 桥
- * 接层的问题，Compose 嵌原生 WebView 无此负担）：
- * - 桌面 UA 加载 pan.quark.cn（防移动 UA 跳"下载App"引导页）
- * - WebViewClient.onPageFinished 检查 CookieManager 里
- *   __pus/__puus（登录特征键，YunX 实锤）→ LoginViewModel
- *   .onLoginCookie(完整串) 存 CookieStore → onLoggedIn() 导航
- * - 已登录直入：LaunchedEffect 检查 CookieStore 非空即回调
+ * 路由参数 panKey 决定登录页 URL / Cookie 采集域 / 特征键
+ * （PanCatalog）。WebView onPageFinished 检查特征键命中 →
+ * 自动保存返回；"我已完成登录"按钮兜底（Cookie 存在即保存——
+ * authKeys 空的网盘走此路径记"未验证"，v3.2.8 同语义）。
  */
 @Composable
 fun LoginScreen(
@@ -52,8 +47,10 @@ fun LoginScreen(
         if (uiState.loggedIn) onLoggedIn()
     }
     LoginScreenContent(
-        loginUrl = QuarkApi.LOGIN_URL,
-        desktopUa = DESKTOP_UA,
+        panName = viewModel.pan.name,
+        loginUrl = viewModel.pan.loginUrl,
+        cookieDomain = "https://${viewModel.pan.domains.first()}",
+        authKeys = viewModel.pan.authKeys,
         loading = uiState.loading,
         onCookie = viewModel::onLoginCookie,
     )
@@ -63,12 +60,14 @@ fun LoginScreen(
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun LoginScreenContent(
+    panName: String,
     loginUrl: String,
-    desktopUa: String,
+    cookieDomain: String,
+    authKeys: List<String>,
     loading: Boolean,
     onCookie: (String) -> Unit,
 ) {
-    Scaffold(topBar = { TopAppBar(title = { Text("登录夸克网盘") }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("登录$panName") }) }) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -76,7 +75,11 @@ internal fun LoginScreenContent(
         ) {
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             Text(
-                text = "在下方页面登录账号（支持验证码/短信/扫码）",
+                text = if (authKeys.isEmpty()) {
+                    "在下方页面登录（该网盘登录态不存 Cookie，保存网页 Cookie 供下载尝试）"
+                } else {
+                    "在下方页面登录账号（支持验证码/短信/扫码）"
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -87,20 +90,16 @@ internal fun LoginScreenContent(
                     WebView(context).apply {
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
-                        settings.userAgentString = desktopUa
+                        settings.userAgentString = DESKTOP_UA
                         settings.useWideViewPort = true
                         settings.loadWithOverviewMode = true
-                        CookieManager.getInstance().apply {
-                            setAcceptCookie(true)
-                        }
-                        CookieManager.getInstance()
-                            .setAcceptThirdPartyCookies(this, true)
+                        CookieManager.getInstance().setAcceptCookie(true)
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
                                 val cookie = CookieManager.getInstance()
-                                    .getCookie(QuarkApi.COOKIE_DOMAIN) ?: return
-                                if (QuarkApi.AUTH_COOKIE_KEYS.any {
+                                    .getCookie(cookieDomain) ?: return
+                                if (authKeys.isNotEmpty() && authKeys.all {
                                         cookie.contains("$it=", ignoreCase = true)
                                     }) {
                                     onCookie(cookie)
@@ -115,10 +114,12 @@ internal fun LoginScreenContent(
             )
             Button(
                 onClick = {
-                    webView?.url?.let { url ->
-                        val cookie = CookieManager.getInstance()
-                            .getCookie(QuarkApi.COOKIE_DOMAIN)
-                        if (url.startsWith("https://pan.quark.cn") && cookie != null) {
+                    webView?.let { view ->
+                        val cookie = CookieManager.getInstance().getCookie(cookieDomain)
+                        if (cookie != null &&
+                            (authKeys.isEmpty() || view.url.orEmpty()
+                                .contains(cookieDomain.removePrefix("https://")))
+                        ) {
                             onCookie(cookie)
                         }
                     }
@@ -142,8 +143,10 @@ private val DESKTOP_UA =
 private fun LoginScreenPreview() {
     MaterialTheme {
         LoginScreenContent(
+            panName = "夸克网盘",
             loginUrl = "https://pan.quark.cn/",
-            desktopUa = DESKTOP_UA,
+            cookieDomain = "https://quark.cn",
+            authKeys = listOf("__pus", "__puus"),
             loading = false,
             onCookie = {},
         )

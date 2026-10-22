@@ -85,7 +85,7 @@ class QuarkShareRepository @Inject constructor(
         val msg = root.optString("message")
         if (code == 4100805 || code == 4101202 || msg.contains("登录")) {
             throw IllegalStateException(
-                "夸克分享解析需登录 Cookie：请先在「网盘」页登录夸克账号"
+                "夸克分享解析需登录 Cookie：请到「账号」页登录夸克"
             )
         }
         throw IllegalStateException("$what: ${msg.ifEmpty { "$code" }}")

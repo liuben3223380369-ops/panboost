@@ -4,8 +4,10 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import org.panboost.core.domain.AccountRepository
 import org.panboost.core.domain.DriveRepository
 import org.panboost.core.domain.ShareRepository
+import org.panboost.core.network.MultiPanCookieStore
 import org.panboost.core.network.QuarkDriveRepository
 import org.panboost.core.network.QuarkShareRepository
 import javax.inject.Singleton
@@ -27,4 +29,11 @@ abstract class RepositoryModule {
     abstract fun bindShareRepository(
         impl: QuarkShareRepository,
     ): ShareRepository
+
+    // v4.3.0：多网盘账号仓库（CookieStore 多网盘化）
+    @Binds
+    @Singleton
+    abstract fun bindAccountRepository(
+        impl: MultiPanCookieStore,
+    ): AccountRepository
 }

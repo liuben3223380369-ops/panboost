@@ -50,7 +50,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-4.2.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-4.3.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -63,12 +63,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v4.2.0——分享链接下载版（P0 核心体验回补）。' 'YunX 式核心链路原生回归（ROADMAP P0 前两项完成）：①分享链接下载——粘贴夸克分享链接（提取码可写在链接里或单独填）→ 解析出文件列表 → 勾选（单选/全选）→ 批量加速下载（8 线程 Range 分块 + 断点续传 + 前台服务通知）；②剪贴板识别——复制分享链接回到 App 自动填入（不覆盖已输入内容）。' '界面升级：底部三 Tab 导航（分享/网盘/下载，M3 NavigationBar）。' '既有能力保留：WebView 登录、我的网盘浏览下载、下载进度/取消/重试/防重复排队、全局崩溃捕获（crash-*.txt）。' '功能差距审计与后续回补（账号管理/多网盘/下载历史/日志屏等 14 项）见仓库 ROADMAP.md。' '权限：网络 + 前台服务 + 通知，零存储权限。' '异常反馈请附：/Android/data/org.panboost.app/files/crashes/crash-*.txt + 操作步骤 + 系统版本。' > "$NOTES_FILE"
-          TAG="android-v4.2.0"
+          printf '%s\n' 'PanBoost v4.3.0——多网盘账号管理版（P0 再下一城）。' 'v3.2.8 账簿原生回归（ROADMAP P0#4/#6 完成）：①18 网盘清单迁移（PanCatalog 数据驱动：夸克/UC/百度/阿里/天翼/移动/迅雷/123/蓝奏/坚果云/Google Drive/Dropbox/OneDrive/MEGA/pCloud/Box/Yandex）——账号页宫格、已登录徽标（特征 Cookie 键验证）/未验证徽标（登录态存 localStorage 的网盘保存 Cookie 供下载尝试）、删除账号。②通用登录页（路由参数选网盘，WebView 加载对应官方登录页自动检测特征 Cookie——新增网盘零代码）。③手动粘贴 Cookie（WebView 登录失败的兜底：浏览器登录后复制 Cookie 粘贴保存，v3.2.8 同款语义）。④底部四 Tab 导航（分享/网盘/下载/账号）。' '既有能力：分享链接勾选批量下载（8 线程分块+断点续传）、我的网盘浏览下载、进度/取消/重试、崩溃捕获。' '后续回补（ROADMAP）：UC/百度等逐家浏览下载接入、下载历史、日志屏。' '权限：网络+前台服务+通知，零存储权限。' '异常反馈请附 crash-*.txt。' > "$NOTES_FILE"
+          TAG="android-v4.3.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.2.0（分享链接下载）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v4.3.0（多网盘账号管理）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

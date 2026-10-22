@@ -3,6 +3,7 @@ package org.panboost.ui
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Icon
@@ -15,22 +16,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import org.panboost.feature.accounts.AccountsScreen
 import org.panboost.feature.download.DownloadScreen
 import org.panboost.feature.home.HomeScreen
 import org.panboost.feature.login.LoginScreen
 import org.panboost.feature.share.ShareScreen
 
 /**
- * 根导航（v4.2.0：login → 底部导航三 Tab [分享/网盘/下载]）。
+ * 根导航（v4.3.0：四 Tab [分享/网盘/下载/账号] + 通用登录页）。
  *
- * - login 为前置屏（检测 Cookie 自动跳 Tab 区）
- * - 分享 Tab（P0 回补）：粘贴分享链接→勾选→批量下载
- * - 网盘 Tab：我的网盘浏览下载；下载 Tab：进度/取消/重试
- * 底部 NavigationBar（M3）+ NavHost 返回栈由 Navigation 管理。
+ * - 分享为起点（解析需登录时错误信息引导去「账号」）
+ * - 通用登录页带 panKey 路由参数（PanCatalog 数据驱动，
+ *   18 网盘均可登录/粘贴 Cookie）
+ * - 底部 M3 NavigationBar，返回栈由 Navigation 管理
  */
 @Composable
 fun PanBoostApp() {
@@ -64,18 +68,9 @@ fun PanBoostApp() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = "login",
+            startDestination = TAB_SHARE,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable("login") {
-                LoginScreen(
-                    onLoggedIn = {
-                        navController.navigate(TAB_SHARE) {
-                            popUpTo("login") { inclusive = true }
-                        }
-                    },
-                )
-            }
             composable(TAB_SHARE) {
                 ShareScreen(
                     onOpenDownload = { navController.navigate(TAB_DOWNLOAD) },
@@ -89,6 +84,23 @@ fun PanBoostApp() {
             composable(TAB_DOWNLOAD) {
                 DownloadScreen()
             }
+            composable(TAB_ACCOUNTS) {
+                AccountsScreen(
+                    onLoginPan = { panKey ->
+                        navController.navigate("login/$panKey")
+                    },
+                )
+            }
+            composable(
+                route = "login/{panKey}",
+                arguments = listOf(
+                    navArgument("panKey") { type = NavType.StringType },
+                ),
+            ) {
+                LoginScreen(
+                    onLoggedIn = { navController.popBackStack() },
+                )
+            }
         }
     }
 }
@@ -96,8 +108,9 @@ fun PanBoostApp() {
 private const val TAB_SHARE = "share"
 private const val TAB_HOME = "home"
 private const val TAB_DOWNLOAD = "download"
+private const val TAB_ACCOUNTS = "accounts"
 
-private val tabRoutes = setOf(TAB_SHARE, TAB_HOME, TAB_DOWNLOAD)
+private val tabRoutes = setOf(TAB_SHARE, TAB_HOME, TAB_DOWNLOAD, TAB_ACCOUNTS)
 
 private data class TabSpec(
     val route: String,
@@ -109,4 +122,5 @@ private val tabs = listOf(
     TabSpec(TAB_SHARE, "分享", Icons.Filled.Share),
     TabSpec(TAB_HOME, "网盘", Icons.Filled.VideoLibrary),
     TabSpec(TAB_DOWNLOAD, "下载", Icons.Filled.Download),
+    TabSpec(TAB_ACCOUNTS, "账号", Icons.Filled.ManageAccounts),
 )

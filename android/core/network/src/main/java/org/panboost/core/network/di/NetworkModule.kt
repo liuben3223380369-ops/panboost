@@ -10,7 +10,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import org.panboost.core.network.CookieStore
+import org.panboost.core.domain.AccountRepository
 import org.panboost.core.network.QuarkApi
 import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
@@ -31,14 +31,14 @@ object NetworkModule {
 
     /** 夸克 API 头策略（客户端 UA + Referer + 登录 Cookie）。 */
     private class QuarkHeaderInterceptor(
-        private val cookieStore: CookieStore,
+        private val accounts: AccountRepository,
     ) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val builder: Request.Builder = chain.request().newBuilder()
                 .header("User-Agent", QuarkApi.CLIENT_UA)
                 .header("Referer", QuarkApi.REFERER)
                 .header("Origin", "https://pan.quark.cn")
-            cookieStore.getQuark()?.let {
+            accounts.getCookie("quark")?.let {
                 builder.header("Cookie", it)
             }
             return chain.proceed(builder.build())
@@ -47,9 +47,9 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(cookieStore: CookieStore): OkHttpClient =
+    fun provideOkHttpClient(accounts: AccountRepository): OkHttpClient =
         OkHttpClient.Builder()
-            .addInterceptor(QuarkHeaderInterceptor(cookieStore))
+            .addInterceptor(QuarkHeaderInterceptor(accounts))
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
