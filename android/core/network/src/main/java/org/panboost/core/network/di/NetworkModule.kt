@@ -74,6 +74,8 @@ object NetworkModule {
                     "uc" -> builder.header("User-Agent", org.panboost.core.network.UcApi.CLIENT_UA)
                         .header("Referer", org.panboost.core.network.UcApi.REFERER)
                         .header("Origin", "https://drive.uc.cn")
+                    // v7.0.0：天翼 web API（OpenList 189 驱动规格）
+                    "tianyi" -> builder.header("Referer", "https://cloud.189.cn/")
                 }
                 snapshot = accounts.getCookie(pan.key).orEmpty()
                 val live = liveCookie(pan, host)
@@ -242,6 +244,23 @@ object NetworkModule {
     @Singleton
     fun provideQuarkShareApi(retrofit: Retrofit): org.panboost.core.network.QuarkShareApi =
         retrofit.create(org.panboost.core.network.QuarkShareApi::class.java)
+
+    // v7.0.0：天翼 web API（独立 Retrofit——cloud.189.cn）
+    @Provides
+    @Singleton
+    @javax.inject.Named("tianyi")
+    fun provideTianyiRetrofit(client: OkHttpClient): Retrofit =
+        Retrofit.Builder()
+            .baseUrl(org.panboost.core.network.TianyiApi.BASE_URL)
+            .client(client)
+            .build()
+
+    @Provides
+    @Singleton
+    fun provideTianyiApi(
+        @javax.inject.Named("tianyi") retrofit: Retrofit,
+    ): org.panboost.core.network.TianyiApi =
+        retrofit.create(org.panboost.core.network.TianyiApi::class.java)
 
     // v6.6.0：UC clouddrive API（独立 baseUrl 的 Retrofit——pc-api.uc.cn）
     @Provides

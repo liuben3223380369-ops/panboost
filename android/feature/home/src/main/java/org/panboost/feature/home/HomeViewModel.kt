@@ -32,13 +32,18 @@ class HomeViewModel @Inject constructor(
     // 其余网盘逐家接入（ROADMAP P0#5）
     private val quarkDrive: org.panboost.core.network.QuarkDriveRepository,
     private val ucDrive: org.panboost.core.network.UcDriveRepository,
+    private val tianyiDrive: org.panboost.core.network.TianyiDriveRepository,
     private val downloadRepository: DownloadRepository,
     accountRepository: AccountRepository,
 ) : ViewModel() {
 
     /** 当前选中网盘的仓库（v6.6.0：quark/uc 均可浏览下载）。 */
     private val driveRepository: DriveRepository
-        get() = if (selectedPan.value == "uc") ucDrive else quarkDrive
+        get() = when (selectedPan.value) {
+            "uc" -> ucDrive
+            "tianyi" -> tianyiDrive
+            else -> quarkDrive
+        }
 
     private val selectedPan = MutableStateFlow("quark")
     private val panel = MutableStateFlow(HomeUiState())
@@ -162,8 +167,8 @@ class HomeViewModel @Inject constructor(
     }
 
     private companion object {
-        /** v6.6.0：已接浏览 API 的网盘（逐家扩充——ROADMAP P0#5）。 */
-        val SUPPORTED_BROWSE = setOf("quark", "uc")
+        /** v7.0.0：已接浏览 API 的网盘（夸克/UC 同源家族+天翼 Cookie 直连）。 */
+        val SUPPORTED_BROWSE = setOf("quark", "uc", "tianyi")
     }
 
     private fun guessMime(name: String): String = when {
