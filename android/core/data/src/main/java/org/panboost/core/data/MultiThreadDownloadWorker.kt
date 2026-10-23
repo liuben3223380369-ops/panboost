@@ -182,7 +182,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 (0 until workers).map { rank ->
                     async(Dispatchers.IO) {
                         downloadLoop(
-                            client, urls, referer, dlCookie, dlUa, total, block, nblocks,
+                            client, urls, referer, dlCookie, dlUa, workers, total, block, nblocks,
                             dir, cursor, doneBytes, speedTracker, livePermits, rank,
                         )
                     }
@@ -241,6 +241,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         referer: String,
         dlCookie: String,
         dlUa: String,
+        maxWorkers: Int,
         total: Long,
         block: Long,
         nblocks: Int,
@@ -315,7 +316,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             speedTracker.add(partFile.length())
             // v5.5.0：爬升并发（每块完成 +1，到上限停）——慢启动核心
             livePermits.updateAndGet { cur ->
-                if (cur < workers) cur + 1 else cur
+                if (cur < maxWorkers) cur + 1 else cur
             }
             // v5.5.0：进度节流（setProgress 是 WorkManager IPC，每块一报
             // ×上千块是隐性大头）——≥400ms 才上报
