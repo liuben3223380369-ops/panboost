@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-6.1.1-android.apk; done
+          for f in *.apk; do mv "$f" panboost-6.2.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v6.1.1——启动闪退根治。' '根因实锤：v6.1.0 冷启动封面的 layer-list 用了 <bitmap android:src="vector">——bitmap 标签运行时要求位图资源，引用 VectorDrawable 解析即抛异常，且 windowBackground 在 Activity 启动第一时间加载 → 必闪退。修复：item 直接引用 drawable（vector 兼容路径）。' '联网研究结论同步：①官方通道——OpenList 的 quark_open 驱动走夸克开放平台 OAuth（需 AppID/SignKey 申请，个人分发不可行，已记 ROADMAP）；②读超时调优——10MB 大块在慢速连接（200KB/s）约需 50s+，60s 边缘超时会断块重拉更亏，调至 120s 稳态兜底；OkHttp 对 CDN 自动协商 HTTP/2，并发 8 在 h2 下是单连接多路复用流（连接风暴天然低——连接层无 412 压力）。' '既有：反风控（固定UA+并发8+10MB块）/App 封面/29 用例门禁。' > "$NOTES_FILE"
-          TAG="android-v6.1.1"
+          printf '%s\n' 'PanBoost v6.2.0——全网盘泛化（根治三处写死夸克）。' '用户批评成立：下载引擎三处硬编码夸克——①直链 Cookie 只查夸克双域（其他网盘直链不带 Cookie 必失败）②Referer 写死 pan.quark.cn ③UA 写死夸克客户端。泛化重制：DownloadTask 携带 panKey（浏览下载传当前网盘/分享下载按链接反查/URL直链与历史重跑按域反查）→ Worker 经 PanCatalog 动态计算下载上下文：Cookie=该网盘全部域+登录页 host 的实时罐合并；Referer=网盘登录页（通用规则——夸克 pan.quark.cn/UC drive.uc.cn/123 www.123pan.com 天然成立）；UA=夸克/UC 系用官方客户端、其余网盘桌面浏览器。Worker 还有 URL 域反查兜底（panKey 缺失时）——任意网盘下载全链路网盘无关。' '既有：反风控/29用例/App封面。' > "$NOTES_FILE"
+          TAG="android-v6.2.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.1.1（启动闪退根治）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.2.0（全网盘泛化）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

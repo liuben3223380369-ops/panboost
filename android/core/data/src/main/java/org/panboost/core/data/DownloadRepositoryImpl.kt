@@ -86,7 +86,9 @@ class DownloadRepositoryImpl @Inject constructor(
             .setInputData(
                 workDataOf(
                     MultiThreadDownloadWorker.KEY_URL to task.url,
-                    MultiThreadDownloadWorker.KEY_REFERER to "https://pan.quark.cn/",
+                    // v6.2.0：panKey 传 Worker 按 PanCatalog 动态算
+                    // Cookie/Referer/UA（此前写死夸克——其他网盘必失败）
+                    MultiThreadDownloadWorker.KEY_PAN to task.panKey,
                     MultiThreadDownloadWorker.KEY_THREADS to parseThreads(task.threadsChoice),
                     MockDownloadWorker.KEY_FILE_NAME to task.fileName,
                     MockDownloadWorker.KEY_MIME to task.mimeType,

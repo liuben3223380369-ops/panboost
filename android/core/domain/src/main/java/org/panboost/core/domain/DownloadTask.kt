@@ -20,6 +20,8 @@ data class DownloadTask(
     val speedBps: Long = 0L,
     /** 线程选择（v5.1.0：auto/8~1024，默认 512）。 */
     val threadsChoice: String = "512",
+    /** 发起网盘（v6.2.0：Worker 按此查 PanCatalog 算 Cookie/Referer/UA）。 */
+    val panKey: String = "",
 )
 
 /** 任务生命周期。 */

@@ -76,6 +76,8 @@ class DownloadViewModel @Inject constructor(
                 mimeType = "application/octet-stream",
                 totalBytes = 0L,
                 threadsChoice = _threadsChoice.value,
+                // v6.2.0：URL 域反查网盘（Worker 兜底同样反查）
+                panKey = org.panboost.core.domain.PanCatalog.byShareUrl(url)?.key ?: "",
             )
         )
         _urlInput.value = ""

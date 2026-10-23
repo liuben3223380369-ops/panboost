@@ -128,6 +128,7 @@ class HomeViewModel @Inject constructor(
                         fileName = file.name,
                         mimeType = guessMime(file.name),
                         totalBytes = file.size,
+                        panKey = "quark",
                     )
                 )
                 panel.update {

@@ -50,6 +50,8 @@ class HistoryViewModel @Inject constructor(
                 mimeType = guessMime(entry.name),
                 totalBytes = entry.size,
                 threadsChoice = "512",
+                // v6.2.0：URL 域反查网盘（Worker 兜底同样反查）
+                panKey = org.panboost.core.domain.PanCatalog.byShareUrl(entry.url)?.key ?: "",
             )
         )
         history.add(entry.copy(status = "重跑", ts = System.currentTimeMillis()))

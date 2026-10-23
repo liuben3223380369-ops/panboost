@@ -89,6 +89,9 @@ class ShareViewModel @Inject constructor(
         val state = _uiState.value
         if (!state.canDownload) return
         val picked = state.files.filter { it.url in state.selected }
+        // v6.2.0：按分享链接反查网盘（Worker 动态算下载上下文）
+        val panKey = org.panboost.core.domain.PanCatalog
+            .byShareUrl(state.shareUrl)?.key.orEmpty()
         picked.forEach { file ->
             downloadRepository.enqueue(
                 DownloadTask(
@@ -97,6 +100,7 @@ class ShareViewModel @Inject constructor(
                     fileName = file.name,
                     mimeType = guessMime(file.name),
                     totalBytes = file.size,
+                    panKey = panKey,
                 )
             )
         }

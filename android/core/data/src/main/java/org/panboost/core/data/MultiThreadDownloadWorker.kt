@@ -66,16 +66,24 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             ?: "panboost.bin"
         val mime = inputData.getString(MockDownloadWorker.KEY_MIME)
             ?: "application/octet-stream"
-        val referer = inputData.getString(KEY_REFERER) ?: QuarkApi.REFERER
         val threadsChoice = inputData.getInt(KEY_THREADS, DEFAULT_THREADS)
-        // v5.3.3：直链请求带 Cookie（夸克直链校验 __puus 签名——
-        // 真机实锤 HTTP 412 的根因：此前只带 Referer/UA）
-        val dlCookie = runCatching {
-            val cm = android.webkit.CookieManager.getInstance()
-            listOf("https://pan.quark.cn", "https://quark.cn")
-                .mapNotNull { cm.getCookie(it) }
-                .joinToString("; ")
-        }.getOrDefault("")
+        // v6.2.0：网盘无关的下载上下文（根治三处写死夸克）——
+        // panKey 经 DownloadTask 传入；URL 兜底反查（直链/历史重跑）
+        val pan = panFor(inputData.getString(KEY_PAN), url)
+        // Referer：catalog 登录页即各网盘主页域（夸克 pan.quark.cn/
+        // UC drive.uc.cn/123 www.123pan.com——通用规则成立）
+        val referer = pan?.loginUrl ?: inputData.getString(KEY_REFERER) ?: ""
+        // Cookie：该网盘全部域 + 登录页 host 的 WebView 实时罐合并
+        val dlCookie = panCookie(pan)
+        // UA：夸克/UC 系（clouddrive API 家族）用官方客户端 UA，
+        // 其余网盘用桌面浏览器 UA
+        val dlUa = if (pan != null && pan.domains.any {
+                it == "quark.cn" || it == "uc.cn"
+            }) dlUa else DESKTOP_UA
+        appLog.info(
+            "download",
+            "上下文：${pan?.key ?: "直链（无网盘）"} cookie=${dlCookie.length}字",
+        )
 
         setForeground(createForegroundInfo(0, 0))
         appLog.info("download", "开始：${fileName.take(40)}（${threadsChoice} 线程）")
@@ -291,7 +299,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         livePermits: AtomicInteger? = null,
         appLog: AppLog? = null,
     ) {
-        var ua = QuarkApi.CLIENT_UA
+        var ua = dlUa
         val backoffs = longArrayOf(1_000, 3_000)
         for (attempt in 0 until 3) {
             try {
@@ -396,7 +404,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                     val request = Request.Builder()
                         .url(url)
                         .header("Referer", referer)
-                        .header("User-Agent", QuarkApi.CLIENT_UA)
+                        .header("User-Agent", dlUa)
                         .header("Range", "bytes=$start-${start + 4 * 1024 * 1024 - 1}")
                         .build()
                     client.newCall(request).execute().use { resp ->
@@ -441,7 +449,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 .url(url)
                 .head()
                 .header("Referer", referer)
-                .header("User-Agent", QuarkApi.CLIENT_UA)
+                .header("User-Agent", dlUa)
                 .apply { if (dlCookie.isNotBlank()) header("Cookie", dlCookie) }
                 .build()
             client.newCall(request).execute().use { resp ->
@@ -458,7 +466,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             val request = Request.Builder()
                 .url(url)
                 .header("Referer", referer)
-                .header("User-Agent", QuarkApi.CLIENT_UA)
+                .header("User-Agent", dlUa)
                 .header("Range", "bytes=0-0")
                 .apply { if (dlCookie.isNotBlank()) header("Cookie", dlCookie) }
                 .build()
@@ -492,7 +500,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         val request = Request.Builder()
             .url(url)
             .header("Referer", referer)
-            .header("User-Agent", QuarkApi.CLIENT_UA)
+            .header("User-Agent", dlUa)
             .apply { if (dlCookie.isNotBlank()) header("Cookie", dlCookie) }
             .build()
         val response = try {
@@ -577,6 +585,49 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         }
     }
 
+    // ---- v6.2.0：网盘无关下载上下文 ----
+
+    /** panKey 直查 + URL 域反查兜底。 */
+    private fun panFor(panKey: String?, url: String) =
+        org.panboost.core.domain.PanCatalog.byKey(panKey ?: "")
+            ?: org.panboost.core.domain.PanCatalog.byShareUrl(url)
+            ?: kotlin.run {
+                val host = try {
+                    java.net.URI(url).host.orEmpty()
+                } catch (_: Exception) {
+                    ""
+                }
+                if (host.isEmpty()) null
+                else org.panboost.core.domain.PanCatalog.all.firstOrNull { pan ->
+                    pan.domains.any { host == it || host.endsWith(".$it") }
+                }
+            }
+
+    /** 该网盘全部域 + 登录页 host 的实时 Cookie 合并（登录态完整）。 */
+    private fun panCookie(pan: org.panboost.core.domain.PanInfo?): String {
+        if (pan == null) return ""
+        return runCatching {
+            val cm = android.webkit.CookieManager.getInstance()
+            val hosts = pan.domains + pan.loginUrl
+                .removePrefix("https://").removePrefix("http://")
+                .substringBefore("/")
+            val kv = linkedMapOf<String, String>()
+            for (h in hosts.filter { it.isNotBlank() }.distinct()) {
+                val raw = try {
+                    cm.getCookie("https://$h")
+                } catch (_: Exception) {
+                    null
+                } ?: continue
+                for (c in raw.split(";")) {
+                    val k = c.substringBefore("=").trim()
+                    val v = c.substringAfter("=").trim()
+                    if (k.isNotEmpty() && v.isNotEmpty()) kv[k] = v
+                }
+            }
+            kv.entries.joinToString("; ") { "${it.key}=${it.value}" }
+        }.getOrDefault("")
+    }
+
     /** 滑动窗口速率（v5.0.0）。 */
     private class SpeedTracker {
         private val samples = ArrayDeque<Pair<Long, Long>>(16)
@@ -613,6 +664,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
     companion object {
         const val KEY_URL = "url"
         const val KEY_REFERER = "referer"
+        const val KEY_PAN = "pan"
         const val KEY_THREADS = "threads"
         const val KEY_SPEED = "speed"
 
@@ -648,6 +700,11 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         const val REPORT_INTERVAL_MS = 400L
 
         private val JITTER_MS = 0L..40L
+
+        /** 非夸克系网盘的下载 UA（标准桌面浏览器）。 */
+        const val DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         private const val CHANNEL_ID = "panboost_download"
         private const val NOTIF_ID = 1001
         private const val COPY_BUF = 100 * 1024
