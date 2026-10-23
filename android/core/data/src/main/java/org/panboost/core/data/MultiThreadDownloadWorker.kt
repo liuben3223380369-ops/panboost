@@ -249,6 +249,9 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
     ) {
         val lastReport = AtomicLong(0)
         val lastLog = AtomicLong(0)
+        // v6.4.0：慢链黑名单（aria2 lowest-speed-limit 等价——
+        // Server Performance Profile 轻量版）
+        val slowLinks = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
         while (!isStopped) {
             // v5.5.0 慢启动门控：worker 序号 < 当前配额才干活；配额爬升后
             // 后排 worker 自动加入，砍半时后排自动暂停
@@ -271,7 +274,16 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             val i = cursor.getAndIncrement()
             if (i >= nblocks) return
             // v6.3.0：块轮询分布到多条直链（每链独立限速）
-            val blockUrl = urls[i % urls.size.coerceAtLeast(1)]
+            // v6.4.0：aria2 --uri-selector=feedback 等价——慢链黑名单
+            // 顺延（块级实测慢的链跳过，选下一链）
+            var linkIdx = i % urls.size.coerceAtLeast(1)
+            if (urls.size > 1 && linkIdx in slowLinks) {
+                linkIdx = (linkIdx + 1) % urls.size
+                if (linkIdx in slowLinks) {
+                    linkIdx = (linkIdx + 1) % urls.size
+                }
+            }
+            val blockUrl = urls[linkIdx]
             val start = i.toLong() * block
             val endExclusive = minOf(start + block, total)
             val partFile = File(dir, "part$i")
@@ -279,10 +291,22 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 doneBytes.addAndGet(endExclusive - start)
                 continue
             }
+            val t0 = System.currentTimeMillis()
             fetchBlock(
                 client, blockUrl, referer, dlCookie,
                 start, endExclusive, partFile, dlUa, livePermits, appLog,
             )
+            // v6.4.0：块级链速实测（aria2 feedback 数据源）——
+            // <64KB/s 持续 2MB 块的链进黑名单（真实低限速而非慢启动抖动）
+            val dt = System.currentTimeMillis() - t0
+            if (dt > 0 && urls.size > 1) {
+                val bps = (endExclusive - start) * 1000 / dt
+                if (bps < SLOW_LINK_BPS) {
+                    if (slowLinks.add(linkIdx)) {
+                        appLog.info("download", "慢链 #$linkIdx 进黑名单（${bps / 1024}KB/s）——后续块跳过")
+                    }
+                }
+            }
             doneBytes.addAndGet(partFile.length())
             speedTracker.add(partFile.length())
             // v5.5.0：爬升并发（每块完成 +1，到上限停）——慢启动核心
@@ -716,9 +740,9 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
         // v3.2.8 引擎块模型常量
         const val BLOCKS_PER_WORKER = 8
-        const val MIN_PIECE = 2L * 1024 * 1024
+        const val MIN_PIECE = 1L * 1024 * 1024
         // v6.0.0：对齐 OpenList PartSize=10MB
-        const val MAX_PIECE = 10L * 1024 * 1024
+        const val MAX_PIECE = 4L * 1024 * 1024
         const val AUTO_TUNE_MIN_BYTES = 64L * 1024 * 1024
 
         // v5.4.2：可退避错误码（412 预条件/403 风控/429 限流）
@@ -727,11 +751,14 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         // v6.0.0：并发收敛 8——OpenList(25217★) quark_uc 驱动实战
         // Concurrency=3 跑满（CDN 单流限速高；高并发纯触发 412 退避
         // 实际吞吐反而暴跌）；慢启动 4 起步爬升至 8
-        const val MAX_CONCURRENT = 8
-        const val SLOW_START = 4
+        const val MAX_CONCURRENT = 32
+        const val SLOW_START = 8
 
         // v5.5.0：大块模型（目标 256 块，块 2~8MB）
-        const val TARGET_BLOCKS = 256
+        const val TARGET_BLOCKS = 64
+
+        // v6.4.0：慢链阈值（aria2 lowest-speed-limit 等价）
+        const val SLOW_LINK_BPS = 64L * 1024
 
         // v5.5.0：进度上报节流（WorkManager IPC 隐性开销）
         const val REPORT_INTERVAL_MS = 400L

@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-6.3.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-6.4.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v6.3.0——多直链并发提速（aria2 multi-URI 同款原理）。' '核心技术：夸克 download API 每次调用返回不同 CDN 节点的直链（dl-pc-zb-jN 节点轮换），单条直链有独立限速——此前只用 1 条直链分块下载，全部块挤同一链的限速管道。多直链并发：解析 4 条直链（去重），257 块轮询分布到各链（块 i → 链 i%4），总吞吐 = 4 × 单链速度；412/403 退避换链不影响其他链。非夸克网盘自动退回单链（其 API 无节点轮换语义）。' '同步优化：①排队日志降噪（此前每 2 秒×4 条刷屏数分钟掩盖进度——改为配额变化才记一次）；②新增 5 秒周期进度日志（百分比/速度/并发——下载进展一眼可见）。' '既有：全网盘泛化/反风控/29 用例门禁。' > "$NOTES_FILE"
-          TAG="android-v6.3.0"
+          printf '%s\n' 'PanBoost v6.4.0——aria2 级引擎调优（联网研究 aria2 官方手册 + Motrix 千万级用户实战档位）。' '研究成果落地三项：①并发 8→32 连接（Motrix balanced~high 档位 16~32；aria2 -x max-connection-per-server 官方语义——v6.0.0 收敛 8 的前提是单直链，v6.3.0 多直链 4 条分散后可安全上调，慢启动 8 起步爬升）；②块 10MB→4MB（Motrix auto/high 档 minSplitSize=4MB——4MB 块喂得起 32 连接的流水；512MB 文件=128 块）；③aria2 --uri-selector=feedback 等价——慢链黑名单：每块完成后实测链速，<64KB/s 的直链进黑名单后续块自动跳过换链（aria2 Server Performance Profile 轻量版 + lowest-speed-limit 等价，慢 CDN 节点不再拖累总吞吐）。' '既有：多直链 4 条并发/全网盘泛化/反风控/29 用例门禁。' > "$NOTES_FILE"
+          TAG="android-v6.4.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.3.0（多直链并发提速）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.4.0（aria2级引擎调优）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true
