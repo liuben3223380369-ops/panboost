@@ -28,10 +28,17 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val driveRepository: DriveRepository,
+    // v6.6.0：双仓库（夸克 + UC——OpenList quark_uc 同源实证）；
+    // 其余网盘逐家接入（ROADMAP P0#5）
+    private val quarkDrive: org.panboost.core.network.QuarkDriveRepository,
+    private val ucDrive: org.panboost.core.network.UcDriveRepository,
     private val downloadRepository: DownloadRepository,
     accountRepository: AccountRepository,
 ) : ViewModel() {
+
+    /** 当前选中网盘的仓库（v6.6.0：quark/uc 均可浏览下载）。 */
+    private val driveRepository: DriveRepository
+        get() = if (selectedPan.value == "uc") ucDrive else quarkDrive
 
     private val selectedPan = MutableStateFlow("quark")
     private val panel = MutableStateFlow(HomeUiState())
@@ -81,8 +88,8 @@ class HomeViewModel @Inject constructor(
 
     private fun load(fid: String) {
         if (panel.value.loading) return  // 防抖
-        // 仅夸克已接浏览 API（其余网盘 UI 占位，Cookie 已存）
-        if (selectedPan.value != "quark") return
+        // v6.6.0：夸克 + UC 已接浏览 API（其余网盘 UI 占位，Cookie 已存）
+        if (selectedPan.value !in SUPPORTED_BROWSE) return
         panel.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             try {
@@ -133,7 +140,8 @@ class HomeViewModel @Inject constructor(
                         fileName = file.name,
                         mimeType = guessMime(file.name),
                         totalBytes = file.size,
-                        panKey = "quark",
+                        // v6.6.0：动态传当前网盘（Worker 泛化上下文）
+                        panKey = selectedPan.value,
                     )
                 )
                 panel.update {
@@ -151,6 +159,11 @@ class HomeViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private companion object {
+        /** v6.6.0：已接浏览 API 的网盘（逐家扩充——ROADMAP P0#5）。 */
+        val SUPPORTED_BROWSE = setOf("quark", "uc")
     }
 
     private fun guessMime(name: String): String = when {

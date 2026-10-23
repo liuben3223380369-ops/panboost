@@ -65,11 +65,15 @@ object NetworkModule {
             val builder = request.newBuilder()
             var snapshot = ""
             if (pan != null) {
-                if (pan.key == "quark") {
+                when (pan.key) {
                     // 夸克 clouddrive API：客户端 UA + Referer（quark-auto-save 实战规格）
-                    builder.header("User-Agent", QuarkApi.CLIENT_UA)
+                    "quark" -> builder.header("User-Agent", QuarkApi.CLIENT_UA)
                         .header("Referer", QuarkApi.REFERER)
                         .header("Origin", "https://pan.quark.cn")
+                    // v6.6.0：UC clouddrive API（OpenList quark_uc 实证同源家族）
+                    "uc" -> builder.header("User-Agent", org.panboost.core.network.UcApi.CLIENT_UA)
+                        .header("Referer", org.panboost.core.network.UcApi.REFERER)
+                        .header("Origin", "https://drive.uc.cn")
                 }
                 snapshot = accounts.getCookie(pan.key).orEmpty()
                 val live = liveCookie(pan, host)
@@ -238,6 +242,23 @@ object NetworkModule {
     @Singleton
     fun provideQuarkShareApi(retrofit: Retrofit): org.panboost.core.network.QuarkShareApi =
         retrofit.create(org.panboost.core.network.QuarkShareApi::class.java)
+
+    // v6.6.0：UC clouddrive API（独立 baseUrl 的 Retrofit——pc-api.uc.cn）
+    @Provides
+    @Singleton
+    @javax.inject.Named("uc")
+    fun provideUcRetrofit(client: OkHttpClient): Retrofit =
+        Retrofit.Builder()
+            .baseUrl(org.panboost.core.network.UcApi.BASE_URL)
+            .client(client)
+            .build()
+
+    @Provides
+    @Singleton
+    fun provideUcApi(
+        @javax.inject.Named("uc") retrofit: Retrofit,
+    ): org.panboost.core.network.UcApi =
+        retrofit.create(org.panboost.core.network.UcApi::class.java)
 
     // v5.0.0：123 云盘分享 API（独立 baseUrl 的第二 Retrofit）
     @Provides
