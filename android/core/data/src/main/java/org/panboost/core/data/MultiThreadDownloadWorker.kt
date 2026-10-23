@@ -321,7 +321,8 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                     }
                 }
                 if (ok) return
-                ua = PersonaInterceptor.nextUa()
+                // v6.0.0：UA 固定不轮换（OpenList/quark-auto-save 双实锤
+                // ——真客户端 UA 恒定，轮换恰是机器人指纹）
                 // v5.5.0：风控码先砍配额（减半，不低于 SLOW_START）
                 livePermits?.updateAndGet { cur ->
                     (cur / 2).coerceAtLeast(SLOW_START)
@@ -333,7 +334,6 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 Thread.sleep(backoffs[attempt])
             } catch (e: Exception) {
                 if (attempt == 2) throw e
-                ua = PersonaInterceptor.nextUa()
                 try {
                     Thread.sleep(backoffs[attempt])
                 } catch (_: InterruptedException) {
@@ -624,15 +624,18 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         // v3.2.8 引擎块模型常量
         const val BLOCKS_PER_WORKER = 8
         const val MIN_PIECE = 2L * 1024 * 1024
-        const val MAX_PIECE = 8L * 1024 * 1024
+        // v6.0.0：对齐 OpenList PartSize=10MB
+        const val MAX_PIECE = 10L * 1024 * 1024
         const val AUTO_TUNE_MIN_BYTES = 64L * 1024 * 1024
 
         // v5.4.2：可退避错误码（412 预条件/403 风控/429 限流）
         val RETRYABLE_CODES = setOf(412, 403, 429)
 
-        // v5.5.0：并发 64→128（大块+慢启动下风控压力可控）
-        const val MAX_CONCURRENT = 128
-        const val SLOW_START = 16
+        // v6.0.0：并发收敛 8——OpenList(25217★) quark_uc 驱动实战
+        // Concurrency=3 跑满（CDN 单流限速高；高并发纯触发 412 退避
+        // 实际吞吐反而暴跌）；慢启动 4 起步爬升至 8
+        const val MAX_CONCURRENT = 8
+        const val SLOW_START = 4
 
         // v5.5.0：大块模型（目标 256 块，块 2~8MB）
         const val TARGET_BLOCKS = 256

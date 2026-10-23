@@ -39,24 +39,10 @@ class PersonaInterceptor : Interceptor {
                     "image/avif,image/webp,image/apng,*/*;q=0.8"
         private val CHROME_UA = Regex("Chrome/|Chromium/|Edg/", RegexOption.IGNORE_CASE)
 
-        /** UA 轮换池（v3.2.8 UARotator——403 风控时换 UA 重试）。 */
-        val UA_POOL = listOf(
-            DEFAULT_UA,
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        )
-
-        @Volatile
-        private var uaCursor: Int = 0
-
-        /** 取下一个轮换 UA（线程安全游标）。 */
-        fun nextUa(): String = synchronized(this) {
-            uaCursor = (uaCursor + 1) % UA_POOL.size
-            UA_POOL[uaCursor]
-        }
+        /**
+         * v6.0.0：UA 轮换已移除——OpenList(25217★)/quark-auto-save(3072★)
+         * 双实锤：真客户端 UA 恒定，轮换恰是机器人指纹（风控信号）。
+         * 退避重试不再换 UA（靠并发收缩+等待解除风控）。
+         */
     }
 }

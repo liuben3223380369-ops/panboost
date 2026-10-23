@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.5.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-6.0.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.5.0——下载提速（四杠杆）。' 'v5.4.2 已根治 412（分块下载正常进行），本轮解决速度慢：①大块模型——512KB×1070 块改为自适应 2~8MB×约 256 块（请求/TLS 开销砍 4-16 倍，单连接吞吐更高）；②慢启动并发——16 起步每完成一块爬升，上限 64→128（起步不触发风控，速度逐步拉满；遇 412/403/429 自动砍半再爬升——风控自适应）；③进度上报节流——setProgress 是 WorkManager IPC，此前每块一报×上千次是隐性大头，改为 400ms 节流+完成兜底终报；④日志增爬升/砍配额可观测（速度调优过程可见）。' '既有：Cookie 全链路/三形态解析/29 用例门禁/防风控。' > "$NOTES_FILE"
-          TAG="android-v5.5.0"
+          printf '%s\n' 'PanBoost v6.0.0——反风控研究重制（双权威项目对照）。' '联网精读两大权威源码后的共识落地：quark-auto-save(3072★) + OpenList(25217★) quark_uc 驱动。核心发现颠覆两个直觉：①UA 轮换是反模式——真客户端 UA 恒定不变，轮换恰是机器人指纹（两大项目 UA 全部固定，OpenList 用 quark-cloud-drive/2.5.20，quark-auto-save 用 3.14.2，都跑得通）——已移除轮换池，退避重试改为纯等待+并发收缩；②并发 8 就够——OpenList 直链下载实战配置 Concurrency=3 + PartSize=10MB 即可跑满（CDN 单流限速高，高并发纯触发 412 退避、实际吞吐反而暴跌）——慢启动上限 128 砍至 8（4 起步爬升），块大小对齐 10MB。' '效果预期：无风控触发 → 无退避等待 → 持续满速；比"高并发+退避"实际吞吐更高。' '既有：Cookie 全链路/实时罐/29 用例门禁。' > "$NOTES_FILE"
+          TAG="android-v6.0.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.5.0（下载提速）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.0.0（反风控研究重制）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true
