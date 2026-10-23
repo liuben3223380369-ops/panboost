@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.4.1-android.apk; done
+          for f in *.apk; do mv "$f" panboost-5.4.2-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.4.1——单元测试门禁版。' '上轮架构查缺的后续项落地：①纯函数提炼 CookieKit（mergeCookie/setKv/extractDownloadUrl 从拦截器内部类与仓库私有方法收编单一定义点）+ 26 个 JUnit 用例（三形态直链提取真机形态/Cookie 合并优先级/键覆盖/网盘目录完整性/格式化）——testReleaseUnitTest 从"跑通不阻塞"收紧为硬门禁（任一用例红即 CI 失败）；②org.json:json 真实实现进 testImplementation（android.jar Stub 模式下 JSON 用例会炸的经典坑）。' '既有：直链 Cookie/三形态解析/CDN 双重探测/512~1024 线程/防风控/三网盘分享/历史/日志。' > "$NOTES_FILE"
-          TAG="android-v5.4.1"
+          printf '%s\n' 'PanBoost v5.4.2——分块下载 412 根治（四层修复）。' '真机日志实锤根因：探测成功（1070 块分块模型生效）但分块请求 412——v5.3.3 给探测/单流加了 Cookie 却在 fetchBlock 调用链漏传（直链校验 Cookie 签名→分块必 412），且 512 并发 Range 瞬时打 CDN 是风控放大器。四层修复：①fetchBlock 全量携带 Cookie（与探测/单流同链路——主根因）；②并发软封顶——逻辑 512 线程仍决定 1070 块，实际并发 worker 封 64 队列化（CDN 单流限速下高并发本就无增益）；③块级退避重试——412/403/429 指数退避 1s/3s/7s+每轮换 UA 共 3 轮；④防中断安全（退避 sleep 响应 interrupt）。' '既有：29 用例测试门禁/Cookie 实时罐/三形态解析/防风控。' > "$NOTES_FILE"
+          TAG="android-v5.4.2"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.4.1（单元测试门禁）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.4.2（分块412根治）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

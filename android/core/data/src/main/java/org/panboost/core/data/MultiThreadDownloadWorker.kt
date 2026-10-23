@@ -135,7 +135,10 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         val block = (total / (threads.toLong() * BLOCKS_PER_WORKER))
             .coerceIn(MIN_PIECE, MAX_PIECE)
         val nblocks = ((total + block - 1) / block).toInt()
-        val workers = threads.coerceAtMost(nblocks)
+        // v5.4.2：并发软封顶——逻辑线程数决定块数（512 线程=1070 块），
+        // 实际并发 worker 封 MAX_CONCURRENT(64)：512 并发 Range 瞬时打
+        // CDN 是 412 风控的放大器；队列化消化剩余块
+        val workers = threads.coerceAtMost(nblocks).coerceAtMost(MAX_CONCURRENT)
         val dir = File(appContext.cacheDir, "parts_${id}")
         dir.mkdirs()
 
@@ -152,7 +155,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 (0 until workers).map {
                     async(Dispatchers.IO) {
                         downloadLoop(
-                            client, url, referer, total, block, nblocks,
+                            client, url, referer, dlCookie, total, block, nblocks,
                             dir, cursor, doneBytes, speedTracker,
                         )
                     }
@@ -203,6 +206,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         client: OkHttpClient,
         url: String,
         referer: String,
+        dlCookie: String,
         total: Long,
         block: Long,
         nblocks: Int,
@@ -221,7 +225,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 doneBytes.addAndGet(endExclusive - start)
                 continue
             }
-            fetchBlock(client, url, referer, start, endExclusive, partFile)
+            fetchBlock(client, url, referer, dlCookie, start, endExclusive, partFile)
             doneBytes.addAndGet(partFile.length())
             speedTracker.add(partFile.length())
             reportProgress(doneBytes.get(), total, speedTracker.rate())
@@ -230,27 +234,37 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         }
     }
 
-    /** 单块 Range 请求（403 换 UA 重试一次——UARotator 语义）。 */
+    /**
+     * 单块 Range 请求（v5.4.2 重写）。
+     *
+     * 真机日志实锤根因：v5.3.3 漏传 dlCookie（直链校验 Cookie 签名
+     * → 分块 412）+ 512 并发放大风控。对策：
+     * - Cookie 全量携带（与探测/单流同链路）
+     * - 412/403/429 指数退避（1s/3s/7s）+ 每轮换 UA，3 轮
+     */
     private fun fetchBlock(
         client: OkHttpClient,
         url: String,
         referer: String,
+        dlCookie: String,
         start: Long,
         endExclusive: Long,
         partFile: File,
     ) {
         var ua = QuarkApi.CLIENT_UA
-        for (attempt in 0 until 2) {
+        val backoffs = longArrayOf(1_000, 3_000)
+        for (attempt in 0 until 3) {
             try {
                 val request = Request.Builder()
                     .url(url)
                     .header("Referer", referer)
                     .header("User-Agent", ua)
                     .header("Range", "bytes=$start-${endExclusive - 1}")
+                    .apply { if (dlCookie.isNotBlank()) header("Cookie", dlCookie) }
                     .build()
                 val ok = client.newCall(request).execute().use { resp ->
                     when {
-                        resp.code == 403 && attempt == 0 -> false
+                        resp.code in RETRYABLE_CODES && attempt < 2 -> false
                         !resp.isSuccessful -> throw IllegalStateException(
                             "块请求失败 HTTP ${resp.code}"
                         )
@@ -268,9 +282,16 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 }
                 if (ok) return
                 ua = PersonaInterceptor.nextUa()
+                Thread.sleep(backoffs[attempt])
             } catch (e: Exception) {
-                if (attempt == 1) throw e
+                if (attempt == 2) throw e
                 ua = PersonaInterceptor.nextUa()
+                try {
+                    Thread.sleep(backoffs[attempt])
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw e
+                }
             }
         }
     }
@@ -557,6 +578,10 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         const val MIN_PIECE = 512L * 1024
         const val MAX_PIECE = 64L * 1024 * 1024
         const val AUTO_TUNE_MIN_BYTES = 64L * 1024 * 1024
+
+        // v5.4.2：可退避错误码（412 预条件/403 风控/429 限流）+ 并发软封顶
+        val RETRYABLE_CODES = setOf(412, 403, 429)
+        const val MAX_CONCURRENT = 64
 
         private val JITTER_MS = 0L..40L
         private const val CHANNEL_ID = "panboost_download"
