@@ -54,6 +54,16 @@
 | 15 | 五屏导航（首页宫格/下载/账号/历史/日志） | ✅ 五 Tab + logs 路由 | M3 NavigationBar | ✅ v5.0.0 |
 | 16 | 下载完成通知点击跳转 | 前台通知无内容 Intent | PendingIntent → MainActivity 深链 download 屏 | 待做 |
 
+## 官方通道研究（v6.1.1 联网结论）
+
+- **quark_open（夸克开放平台）**：OpenList 另有官方 OAuth 通道
+  （`open-api-drive.quark.cn`，AppID/SignKey 签名）——无网页风控、
+  无 UA 伪装需求；但需向夸克申请开发者凭证，个人分发 App 不可行。
+  若未来获得凭证可整层替换网络层。
+- **直链过期刷新**：夸克直链 URL 自带过期参数（e=xxx），大文件
+  多块下载耗时长，中途过期 → 403。增强方向：fetchBlock 重试失败时
+  回调重取直链续传（跨 Worker/API 层，待做）。
+
 ## 架构不变量（回补时必须守住）
 
 - 零存储权限（MediaStore 正统路径）

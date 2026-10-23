@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-6.1.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-6.1.1-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v6.1.0——App 封面 + 网盘域核对版。' '①App 封面：自适应图标（三箭头聚合下载标志——纯 VectorDrawable 零二进制，品牌蓝背景）+ 冷启动封面（深蓝底+居中 logo，冷启动不再白屏闪断）。' '②网盘域核对（OpenList 89 驱动逐一对照）：UC 补 pc-api.uc.cn（OpenList quark_uc UC 版 API 域）、天翼补 api.cloud.189.cn（189pc 网页版 API 域）、蓝奏补 woozooo.com（OpenList 实锤主域——网页版文件操作常用域）——Cookie 采集域覆盖更完整。' '既有：反风控（固定UA+并发8+10MB块）/Cookie 全链路/29 用例门禁。' > "$NOTES_FILE"
-          TAG="android-v6.1.0"
+          printf '%s\n' 'PanBoost v6.1.1——启动闪退根治。' '根因实锤：v6.1.0 冷启动封面的 layer-list 用了 <bitmap android:src="vector">——bitmap 标签运行时要求位图资源，引用 VectorDrawable 解析即抛异常，且 windowBackground 在 Activity 启动第一时间加载 → 必闪退。修复：item 直接引用 drawable（vector 兼容路径）。' '联网研究结论同步：①官方通道——OpenList 的 quark_open 驱动走夸克开放平台 OAuth（需 AppID/SignKey 申请，个人分发不可行，已记 ROADMAP）；②读超时调优——10MB 大块在慢速连接（200KB/s）约需 50s+，60s 边缘超时会断块重拉更亏，调至 120s 稳态兜底；OkHttp 对 CDN 自动协商 HTTP/2，并发 8 在 h2 下是单连接多路复用流（连接风暴天然低——连接层无 412 压力）。' '既有：反风控（固定UA+并发8+10MB块）/App 封面/29 用例门禁。' > "$NOTES_FILE"
+          TAG="android-v6.1.1"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.1.0（App封面+网盘域核对）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.1.1（启动闪退根治）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

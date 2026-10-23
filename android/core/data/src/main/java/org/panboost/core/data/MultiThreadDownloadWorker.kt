@@ -92,7 +92,11 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         // v5.1.0：1024 并发前置（Dispatcher/连接池）
         val client = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
+            // v6.1.1：10MB 大块 @ 慢速连接（200KB/s）≈50s+握手——
+            // 60s 边缘超时会断块重拉（更亏）；120s 稳态兜底。
+            // 注：OkHttp 对 CDN host 自动协商 HTTP/2（ALPN）——
+            // 并发 8 在 h2 下是单连接多路复用流，连接风暴天然低。
+            .readTimeout(120, TimeUnit.SECONDS)
             .dispatcher(okhttp3.Dispatcher().apply {
                 maxRequests = MAX_THREADS
                 maxRequestsPerHost = MAX_THREADS

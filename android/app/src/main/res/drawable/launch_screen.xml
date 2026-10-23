@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- v6.1.0：冷启动封面（纯色+居中 logo——与图标同源视觉） -->
+<!-- v6.1.1：冷启动封面（修复 v6.1.0 闪退根因）。
+     v6.1.0 的 <bitmap android:src="vector"> 是经典炸点——bitmap 标签
+     运行时要求 BitmapDrawable，引 VectorDrawable 解析即抛 InflateException，
+     windowBackground 在 Activity 启动第一时间加载 → 必闪退。
+     修复：item 直接引 drawable（vector 兼容路径）。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/launch_bg"/>
-    <item android:gravity="center">
-        <bitmap android:src="@drawable/ic_launcher_foreground"
-            android:gravity="center"/>
-    </item>
+    <item android:drawable="@drawable/ic_launcher_foreground"
+        android:gravity="center"/>
 </layer-list>
