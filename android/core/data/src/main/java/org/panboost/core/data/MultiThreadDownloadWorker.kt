@@ -113,19 +113,19 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             .build()
 
         // v5.3.2：探测（HEAD 被拒 → GET Range 探测 → 全失败降级单流）
-        val probe = probeRange(client, url, referer, dlCookie)
+        val probe = probeRange(client, url, referer, dlCookie, dlUa)
         if (probe == null) {
             appLog.warn(
                 "download",
                 "HEAD/Range 探测均失败（CDN 拒绝探测）——降级单流 GET：$fileName",
             )
             return downloadSingleStream(
-                client, url, fileName, mime, referer, dlCookie, speedTracker,
+                client, url, fileName, mime, referer, dlCookie, dlUa, speedTracker,
             )
         }
         if (!probe.rangeOk || probe.total <= 0) {
             return downloadSingleStream(
-                client, url, fileName, mime, referer, dlCookie, speedTracker,
+                client, url, fileName, mime, referer, dlCookie, dlUa, speedTracker,
             )
         }
         val total = probe.total
@@ -170,7 +170,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 (0 until workers).map { rank ->
                     async(Dispatchers.IO) {
                         downloadLoop(
-                            client, url, referer, dlCookie, total, block, nblocks,
+                            client, url, referer, dlCookie, dlUa, total, block, nblocks,
                             dir, cursor, doneBytes, speedTracker, livePermits, rank,
                         )
                     }
@@ -228,6 +228,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         url: String,
         referer: String,
         dlCookie: String,
+        dlUa: String,
         total: Long,
         block: Long,
         nblocks: Int,
@@ -261,7 +262,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             }
             fetchBlock(
                 client, url, referer, dlCookie,
-                start, endExclusive, partFile, livePermits, appLog,
+                start, endExclusive, partFile, dlUa, livePermits, appLog,
             )
             doneBytes.addAndGet(partFile.length())
             speedTracker.add(partFile.length())
@@ -296,6 +297,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         start: Long,
         endExclusive: Long,
         partFile: File,
+        dlUa: String,
         livePermits: AtomicInteger? = null,
         appLog: AppLog? = null,
     ) {
@@ -442,6 +444,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         url: String,
         referer: String,
         dlCookie: String,
+        dlUa: String,
     ): ProbeInfo? {
         // 1. HEAD 探测
         try {
@@ -495,6 +498,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         mime: String,
         referer: String,
         dlCookie: String,
+        dlUa: String,
         speedTracker: SpeedTracker?,
     ): Result {
         val request = Request.Builder()
