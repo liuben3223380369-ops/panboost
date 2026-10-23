@@ -151,17 +151,21 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             threadsChoice.coerceIn(1, MAX_THREADS)
         }
 
-        // ---- 块模型（v5.5.0 速度优化：目标 ~256 大块 [2MB, 8MB]） ----
-        // 512KB 小块×1070 块 = 每块请求/TLS 开销占比过高（真机速度慢
-        // 主因）；2-8MB 大块把请求数砍 4-16 倍，单连接吞吐更高
-        val block = (total / TARGET_BLOCKS).coerceIn(MIN_PIECE, MAX_PIECE)
+        // ---- 块模型（v6.5.0：回归 v3.2.8 引擎规格——threads×8 块，
+        // 512KB~64MB 自适应；1024 线程时 512MB 文件=8192 块/每线程 8 块） ----
+        val block = (total / (threads.toLong() * BLOCKS_PER_WORKER))
+            .coerceIn(MIN_PIECE, MAX_PIECE)
         val nblocks = ((total + block - 1) / block).toInt()
-        // v5.5.0：慢启动并发——16 起步每 8 块爬升 ×1.5 至 MAX_CONCURRENT
-        // (128)，412/403 退避时砍半（风控自适应）；worker 协程固定启动
-        // MAX_CONCURRENT 个，靠 livePermits 排队门控实际并发
-        val workers = threads.coerceAtMost(nblocks).coerceAtMost(MAX_CONCURRENT)
+        // v6.5.0：用户主权——选多少线程开多少 worker（上限 MAX_THREADS
+        // 1024；v6.4.0 的 coerceAtMost(32) 是对用户选择的背叛）。
+        // 慢启动/退避砍配额/慢链黑名单作为保护层保留（起步 SLOW_START
+        // 爬升至所选值，412/403 自动收缩——保护而非限制）
+        val workers = threads.coerceAtMost(nblocks)
         val livePermits = java.util.concurrent.atomic.AtomicInteger(SLOW_START)
-        appLog.info("download", "慢启动：${SLOW_START} 并发起步（爬升上限 $MAX_CONCURRENT）")
+        appLog.info(
+            "download",
+            "慢启动：${SLOW_START} 并发起步（爬升至所选 $workers）",
+        )
         val dir = File(appContext.cacheDir, "parts_${id}")
         dir.mkdirs()
 
@@ -311,7 +315,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             speedTracker.add(partFile.length())
             // v5.5.0：爬升并发（每块完成 +1，到上限停）——慢启动核心
             livePermits.updateAndGet { cur ->
-                if (cur < MAX_CONCURRENT) cur + 1 else cur
+                if (cur < workers) cur + 1 else cur
             }
             // v5.5.0：进度节流（setProgress 是 WorkManager IPC，每块一报
             // ×上千块是隐性大头）——≥400ms 才上报
@@ -740,9 +744,9 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
         // v3.2.8 引擎块模型常量
         const val BLOCKS_PER_WORKER = 8
-        const val MIN_PIECE = 1L * 1024 * 1024
+        const val MIN_PIECE = 512L * 1024
         // v6.0.0：对齐 OpenList PartSize=10MB
-        const val MAX_PIECE = 4L * 1024 * 1024
+        const val MAX_PIECE = 64L * 1024 * 1024
         const val AUTO_TUNE_MIN_BYTES = 64L * 1024 * 1024
 
         // v5.4.2：可退避错误码（412 预条件/403 风控/429 限流）
@@ -751,11 +755,8 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         // v6.0.0：并发收敛 8——OpenList(25217★) quark_uc 驱动实战
         // Concurrency=3 跑满（CDN 单流限速高；高并发纯触发 412 退避
         // 实际吞吐反而暴跌）；慢启动 4 起步爬升至 8
-        const val MAX_CONCURRENT = 32
-        const val SLOW_START = 8
+        const val SLOW_START = 16
 
-        // v5.5.0：大块模型（目标 256 块，块 2~8MB）
-        const val TARGET_BLOCKS = 64
 
         // v6.4.0：慢链阈值（aria2 lowest-speed-limit 等价）
         const val SLOW_LINK_BPS = 64L * 1024
