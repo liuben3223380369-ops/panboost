@@ -131,14 +131,17 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             threadsChoice.coerceIn(1, MAX_THREADS)
         }
 
-        // ---- 块模型（threads×8 块 / clamp [512KB, 64MB]） ----
-        val block = (total / (threads.toLong() * BLOCKS_PER_WORKER))
-            .coerceIn(MIN_PIECE, MAX_PIECE)
+        // ---- 块模型（v5.5.0 速度优化：目标 ~256 大块 [2MB, 8MB]） ----
+        // 512KB 小块×1070 块 = 每块请求/TLS 开销占比过高（真机速度慢
+        // 主因）；2-8MB 大块把请求数砍 4-16 倍，单连接吞吐更高
+        val block = (total / TARGET_BLOCKS).coerceIn(MIN_PIECE, MAX_PIECE)
         val nblocks = ((total + block - 1) / block).toInt()
-        // v5.4.2：并发软封顶——逻辑线程数决定块数（512 线程=1070 块），
-        // 实际并发 worker 封 MAX_CONCURRENT(64)：512 并发 Range 瞬时打
-        // CDN 是 412 风控的放大器；队列化消化剩余块
+        // v5.5.0：慢启动并发——16 起步每 8 块爬升 ×1.5 至 MAX_CONCURRENT
+        // (128)，412/403 退避时砍半（风控自适应）；worker 协程固定启动
+        // MAX_CONCURRENT 个，靠 livePermits 排队门控实际并发
         val workers = threads.coerceAtMost(nblocks).coerceAtMost(MAX_CONCURRENT)
+        val livePermits = java.util.concurrent.atomic.AtomicInteger(SLOW_START)
+        appLog.info("download", "慢启动：${SLOW_START} 并发起步（爬升上限 $MAX_CONCURRENT）")
         val dir = File(appContext.cacheDir, "parts_${id}")
         dir.mkdirs()
 
@@ -152,11 +155,11 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
         try {
             coroutineScope {
-                (0 until workers).map {
+                (0 until workers).map { rank ->
                     async(Dispatchers.IO) {
                         downloadLoop(
                             client, url, referer, dlCookie, total, block, nblocks,
-                            dir, cursor, doneBytes, speedTracker,
+                            dir, cursor, doneBytes, speedTracker, livePermits, rank,
                         )
                     }
                 }.awaitAll()
@@ -165,6 +168,12 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 dir.deleteRecursively()
                 return fail(fileName)
             }
+
+            reportProgress(doneBytes.get(), total, speedTracker.rate())
+            appLog.info(
+                "download",
+                "全块完成：$nblocks 块 / 最终并发 ${livePermits.get()}",
+            )
 
             // ---- 合并（块顺序拼接） ----
             val output = writer.create(fileName, mime)
@@ -214,8 +223,21 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         cursor: AtomicInteger,
         doneBytes: AtomicLong,
         speedTracker: SpeedTracker,
+        livePermits: AtomicInteger,
+        workerRank: Int,
     ) {
+        val lastReport = AtomicLong(0)
         while (!isStopped) {
+            // v5.5.0 慢启动门控：worker 序号 < 当前配额才干活；配额爬升后
+            // 后排 worker 自动加入，砍半时后排自动暂停
+            var gate = 0
+            while (!isStopped && workerRank >= livePermits.get()) {
+                if (++gate % 40 == 0) {  // ~2s 提示一次（50ms×40）
+                    appLog.info("download", "并发配额 ${livePermits.get()}，worker#$workerRank 排队中")
+                }
+                delay(50)
+            }
+            if (isStopped) return
             val i = cursor.getAndIncrement()
             if (i >= nblocks) return
             val start = i.toLong() * block
@@ -225,22 +247,34 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 doneBytes.addAndGet(endExclusive - start)
                 continue
             }
-            fetchBlock(client, url, referer, dlCookie, start, endExclusive, partFile)
+            fetchBlock(
+                client, url, referer, dlCookie,
+                start, endExclusive, partFile, livePermits, appLog,
+            )
             doneBytes.addAndGet(partFile.length())
             speedTracker.add(partFile.length())
-            reportProgress(doneBytes.get(), total, speedTracker.rate())
+            // v5.5.0：爬升并发（每块完成 +1，到上限停）——慢启动核心
+            livePermits.updateAndGet { cur ->
+                if (cur < MAX_CONCURRENT) cur + 1 else cur
+            }
+            // v5.5.0：进度节流（setProgress 是 WorkManager IPC，每块一报
+            // ×上千块是隐性大头）——≥400ms 才上报
+            val now = System.currentTimeMillis()
+            if (now - lastReport.get() >= REPORT_INTERVAL_MS) {
+                lastReport.set(now)
+                reportProgress(doneBytes.get(), total, speedTracker.rate())
+            }
             // 块间随机抖动（防风控：避免完美等间隔请求）
             delay(JITTER_MS.random())
         }
     }
 
     /**
-     * 单块 Range 请求（v5.4.2 重写）。
+     * 单块 Range 请求（v5.5.0）。
      *
-     * 真机日志实锤根因：v5.3.3 漏传 dlCookie（直链校验 Cookie 签名
-     * → 分块 412）+ 512 并发放大风控。对策：
-     * - Cookie 全量携带（与探测/单流同链路）
-     * - 412/403/429 指数退避（1s/3s/7s）+ 每轮换 UA，3 轮
+     * - Cookie 全量携带（直链校验签名）
+     * - 412/403/429：砍并发配额（减半不低于 SLOW_START）+ 换 UA +
+     *   指数退避（1s/3s），2 次重试后仍失败抛出
      */
     private fun fetchBlock(
         client: OkHttpClient,
@@ -250,6 +284,8 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         start: Long,
         endExclusive: Long,
         partFile: File,
+        livePermits: AtomicInteger? = null,
+        appLog: AppLog? = null,
     ) {
         var ua = QuarkApi.CLIENT_UA
         val backoffs = longArrayOf(1_000, 3_000)
@@ -262,9 +298,13 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                     .header("Range", "bytes=$start-${endExclusive - 1}")
                     .apply { if (dlCookie.isNotBlank()) header("Cookie", dlCookie) }
                     .build()
+                var retryableCode = 0
                 val ok = client.newCall(request).execute().use { resp ->
                     when {
-                        resp.code in RETRYABLE_CODES && attempt < 2 -> false
+                        resp.code in RETRYABLE_CODES && attempt < 2 -> {
+                            retryableCode = resp.code
+                            false
+                        }
                         !resp.isSuccessful -> throw IllegalStateException(
                             "块请求失败 HTTP ${resp.code}"
                         )
@@ -282,6 +322,14 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 }
                 if (ok) return
                 ua = PersonaInterceptor.nextUa()
+                // v5.5.0：风控码先砍配额（减半，不低于 SLOW_START）
+                livePermits?.updateAndGet { cur ->
+                    (cur / 2).coerceAtLeast(SLOW_START)
+                }
+                appLog?.warn(
+                    "download",
+                    "HTTP $retryableCode 退避：并发砍至 ${livePermits?.get()}",
+                )
                 Thread.sleep(backoffs[attempt])
             } catch (e: Exception) {
                 if (attempt == 2) throw e
@@ -575,13 +623,22 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
         // v3.2.8 引擎块模型常量
         const val BLOCKS_PER_WORKER = 8
-        const val MIN_PIECE = 512L * 1024
-        const val MAX_PIECE = 64L * 1024 * 1024
+        const val MIN_PIECE = 2L * 1024 * 1024
+        const val MAX_PIECE = 8L * 1024 * 1024
         const val AUTO_TUNE_MIN_BYTES = 64L * 1024 * 1024
 
-        // v5.4.2：可退避错误码（412 预条件/403 风控/429 限流）+ 并发软封顶
+        // v5.4.2：可退避错误码（412 预条件/403 风控/429 限流）
         val RETRYABLE_CODES = setOf(412, 403, 429)
-        const val MAX_CONCURRENT = 64
+
+        // v5.5.0：并发 64→128（大块+慢启动下风控压力可控）
+        const val MAX_CONCURRENT = 128
+        const val SLOW_START = 16
+
+        // v5.5.0：大块模型（目标 256 块，块 2~8MB）
+        const val TARGET_BLOCKS = 256
+
+        // v5.5.0：进度上报节流（WorkManager IPC 隐性开销）
+        const val REPORT_INTERVAL_MS = 400L
 
         private val JITTER_MS = 0L..40L
         private const val CHANNEL_ID = "panboost_download"

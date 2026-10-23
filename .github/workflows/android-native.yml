@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-5.4.2-android.apk; done
+          for f in *.apk; do mv "$f" panboost-5.5.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v5.4.2——分块下载 412 根治（四层修复）。' '真机日志实锤根因：探测成功（1070 块分块模型生效）但分块请求 412——v5.3.3 给探测/单流加了 Cookie 却在 fetchBlock 调用链漏传（直链校验 Cookie 签名→分块必 412），且 512 并发 Range 瞬时打 CDN 是风控放大器。四层修复：①fetchBlock 全量携带 Cookie（与探测/单流同链路——主根因）；②并发软封顶——逻辑 512 线程仍决定 1070 块，实际并发 worker 封 64 队列化（CDN 单流限速下高并发本就无增益）；③块级退避重试——412/403/429 指数退避 1s/3s/7s+每轮换 UA 共 3 轮；④防中断安全（退避 sleep 响应 interrupt）。' '既有：29 用例测试门禁/Cookie 实时罐/三形态解析/防风控。' > "$NOTES_FILE"
-          TAG="android-v5.4.2"
+          printf '%s\n' 'PanBoost v5.5.0——下载提速（四杠杆）。' 'v5.4.2 已根治 412（分块下载正常进行），本轮解决速度慢：①大块模型——512KB×1070 块改为自适应 2~8MB×约 256 块（请求/TLS 开销砍 4-16 倍，单连接吞吐更高）；②慢启动并发——16 起步每完成一块爬升，上限 64→128（起步不触发风控，速度逐步拉满；遇 412/403/429 自动砍半再爬升——风控自适应）；③进度上报节流——setProgress 是 WorkManager IPC，此前每块一报×上千次是隐性大头，改为 400ms 节流+完成兜底终报；④日志增爬升/砍配额可观测（速度调优过程可见）。' '既有：Cookie 全链路/三形态解析/29 用例门禁/防风控。' > "$NOTES_FILE"
+          TAG="android-v5.5.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.4.2（分块412根治）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v5.5.0（下载提速）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true
