@@ -62,6 +62,14 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val url = inputData.getString(KEY_URL) ?: return Result.failure()
+        // v6.3.0：多直链并发（aria2 multi-URI 同款）——夸克 download API
+        // 每次调用返回不同 CDN 节点直链，单链独立限速；N 条直链块轮询
+        // 分布，总吞吐 = N × 单链速度
+        val extraUrls = inputData.getStringArray(KEY_URLS).orEmpty()
+        val urls = (listOf(url) + extraUrls).distinct()
+        if (urls.size > 1) {
+            appLog.info("download", "多直链模式：${urls.size} 条直链并发")
+        }
         val fileName = inputData.getString(MockDownloadWorker.KEY_FILE_NAME)
             ?: "panboost.bin"
         val mime = inputData.getString(MockDownloadWorker.KEY_MIME)
@@ -113,19 +121,19 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             .build()
 
         // v5.3.2：探测（HEAD 被拒 → GET Range 探测 → 全失败降级单流）
-        val probe = probeRange(client, url, referer, dlCookie, dlUa)
+        val probe = probeRange(client, urls[0], referer, dlCookie, dlUa)
         if (probe == null) {
             appLog.warn(
                 "download",
                 "HEAD/Range 探测均失败（CDN 拒绝探测）——降级单流 GET：$fileName",
             )
             return downloadSingleStream(
-                client, url, fileName, mime, referer, dlCookie, dlUa, speedTracker,
+                client, urls[0], fileName, mime, referer, dlCookie, dlUa, speedTracker,
             )
         }
         if (!probe.rangeOk || probe.total <= 0) {
             return downloadSingleStream(
-                client, url, fileName, mime, referer, dlCookie, dlUa, speedTracker,
+                client, urls[0], fileName, mime, referer, dlCookie, dlUa, speedTracker,
             )
         }
         val total = probe.total
@@ -170,7 +178,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 (0 until workers).map { rank ->
                     async(Dispatchers.IO) {
                         downloadLoop(
-                            client, url, referer, dlCookie, dlUa, total, block, nblocks,
+                            client, urls, referer, dlCookie, dlUa, total, block, nblocks,
                             dir, cursor, doneBytes, speedTracker, livePermits, rank,
                         )
                     }
@@ -225,7 +233,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
     /** worker 主循环：取块 → 下载（断点跳过/403 换 UA/抖动）。 */
     private suspend fun downloadLoop(
         client: OkHttpClient,
-        url: String,
+        urls: List<String>,
         referer: String,
         dlCookie: String,
         dlUa: String,
@@ -240,19 +248,30 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         workerRank: Int,
     ) {
         val lastReport = AtomicLong(0)
+        val lastLog = AtomicLong(0)
         while (!isStopped) {
             // v5.5.0 慢启动门控：worker 序号 < 当前配额才干活；配额爬升后
             // 后排 worker 自动加入，砍半时后排自动暂停
             var gate = 0
+            var lastLoggedPermit = -1
             while (!isStopped && workerRank >= livePermits.get()) {
-                if (++gate % 40 == 0) {  // ~2s 提示一次（50ms×40）
-                    appLog.info("download", "并发配额 ${livePermits.get()}，worker#$workerRank 排队中")
+                // v6.2.1：只在配额变化时记一次（去刷屏）
+                val permitNow = livePermits.get()
+                if (permitNow != lastLoggedPermit) {
+                    lastLoggedPermit = permitNow
+                    appLog.info(
+                        "download",
+                        "并发 $permitNow（worker#$workerRank 排队）",
+                    )
                 }
+                gate++
                 delay(50)
             }
             if (isStopped) return
             val i = cursor.getAndIncrement()
             if (i >= nblocks) return
+            // v6.3.0：块轮询分布到多条直链（每链独立限速）
+            val blockUrl = urls[i % urls.size.coerceAtLeast(1)]
             val start = i.toLong() * block
             val endExclusive = minOf(start + block, total)
             val partFile = File(dir, "part$i")
@@ -261,7 +280,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 continue
             }
             fetchBlock(
-                client, url, referer, dlCookie,
+                client, blockUrl, referer, dlCookie,
                 start, endExclusive, partFile, dlUa, livePermits, appLog,
             )
             doneBytes.addAndGet(partFile.length())
@@ -276,6 +295,17 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             if (now - lastReport.get() >= REPORT_INTERVAL_MS) {
                 lastReport.set(now)
                 reportProgress(doneBytes.get(), total, speedTracker.rate())
+            }
+            // v6.2.1：5s 周期进度日志（速度/百分比/并发）
+            if (now - lastLog.get() >= PROGRESS_LOG_MS) {
+                lastLog.set(now)
+                val done = doneBytes.get()
+                val pct = if (total > 0) done * 100 / total else 0
+                appLog.info(
+                    "download",
+                    "进度 $pct%（${done / 1024 / 1024}/${total / 1024 / 1024}MB）" +
+                            " ${fmt(speedTracker.rate())}/s 并发${livePermits.get()}",
+                )
             }
             // 块间随机抖动（防风控：避免完美等间隔请求）
             delay(JITTER_MS.random())
@@ -671,6 +701,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         const val KEY_URL = "url"
         const val KEY_REFERER = "referer"
         const val KEY_PAN = "pan"
+        const val KEY_URLS = "urls"
         const val KEY_THREADS = "threads"
         const val KEY_SPEED = "speed"
 
@@ -704,6 +735,9 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
         // v5.5.0：进度上报节流（WorkManager IPC 隐性开销）
         const val REPORT_INTERVAL_MS = 400L
+
+        // v6.2.1：进度日志周期
+        const val PROGRESS_LOG_MS = 5_000L
 
         private val JITTER_MS = 0L..40L
 

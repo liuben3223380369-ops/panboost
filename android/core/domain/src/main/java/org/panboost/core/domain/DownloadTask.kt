@@ -22,6 +22,8 @@ data class DownloadTask(
     val threadsChoice: String = "512",
     /** 发起网盘（v6.2.0：Worker 按此查 PanCatalog 算 Cookie/Referer/UA）。 */
     val panKey: String = "",
+    /** 多直链（v6.3.0：CDN 节点轮换并发——首条为主链）。 */
+    val extraUrls: List<String> = emptyList(),
 )
 
 /** 任务生命周期。 */

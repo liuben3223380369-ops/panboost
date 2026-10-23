@@ -120,11 +120,16 @@ class HomeViewModel @Inject constructor(
         panel.update { it.copy(downloading = file) }
         viewModelScope.launch {
             try {
-                val url = driveRepository.getDownloadUrl(file.fid)
+                // v6.3.0：多直链解析（4 条 CDN 节点轮换——总吞吐×N）
+                val urls = driveRepository.getDownloadUrls(file.fid, 4)
+                if (urls.isEmpty()) {
+                    throw IllegalStateException("直链解析失败（空响应）")
+                }
                 downloadRepository.enqueue(
                     DownloadTask(
                         id = UUID.randomUUID().toString(),
-                        url = url,
+                        url = urls[0],
+                        extraUrls = urls.drop(1),
                         fileName = file.name,
                         mimeType = guessMime(file.name),
                         totalBytes = file.size,

@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-6.2.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-6.3.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v6.2.0——全网盘泛化（根治三处写死夸克）。' '用户批评成立：下载引擎三处硬编码夸克——①直链 Cookie 只查夸克双域（其他网盘直链不带 Cookie 必失败）②Referer 写死 pan.quark.cn ③UA 写死夸克客户端。泛化重制：DownloadTask 携带 panKey（浏览下载传当前网盘/分享下载按链接反查/URL直链与历史重跑按域反查）→ Worker 经 PanCatalog 动态计算下载上下文：Cookie=该网盘全部域+登录页 host 的实时罐合并；Referer=网盘登录页（通用规则——夸克 pan.quark.cn/UC drive.uc.cn/123 www.123pan.com 天然成立）；UA=夸克/UC 系用官方客户端、其余网盘桌面浏览器。Worker 还有 URL 域反查兜底（panKey 缺失时）——任意网盘下载全链路网盘无关。' '既有：反风控/29用例/App封面。' > "$NOTES_FILE"
-          TAG="android-v6.2.0"
+          printf '%s\n' 'PanBoost v6.3.0——多直链并发提速（aria2 multi-URI 同款原理）。' '核心技术：夸克 download API 每次调用返回不同 CDN 节点的直链（dl-pc-zb-jN 节点轮换），单条直链有独立限速——此前只用 1 条直链分块下载，全部块挤同一链的限速管道。多直链并发：解析 4 条直链（去重），257 块轮询分布到各链（块 i → 链 i%4），总吞吐 = 4 × 单链速度；412/403 退避换链不影响其他链。非夸克网盘自动退回单链（其 API 无节点轮换语义）。' '同步优化：①排队日志降噪（此前每 2 秒×4 条刷屏数分钟掩盖进度——改为配额变化才记一次）；②新增 5 秒周期进度日志（百分比/速度/并发——下载进展一眼可见）。' '既有：全网盘泛化/反风控/29 用例门禁。' > "$NOTES_FILE"
+          TAG="android-v6.3.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.2.0（全网盘泛化）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v6.3.0（多直链并发提速）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

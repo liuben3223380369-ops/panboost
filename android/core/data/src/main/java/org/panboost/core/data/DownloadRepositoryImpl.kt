@@ -86,6 +86,7 @@ class DownloadRepositoryImpl @Inject constructor(
             .setInputData(
                 workDataOf(
                     MultiThreadDownloadWorker.KEY_URL to task.url,
+                    MultiThreadDownloadWorker.KEY_URLS to task.extraUrls.toTypedArray(),
                     // v6.2.0：panKey 传 Worker 按 PanCatalog 动态算
                     // Cookie/Referer/UA（此前写死夸克——其他网盘必失败）
                     MultiThreadDownloadWorker.KEY_PAN to task.panKey,

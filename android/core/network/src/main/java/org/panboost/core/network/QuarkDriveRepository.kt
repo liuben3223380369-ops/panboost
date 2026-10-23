@@ -55,6 +55,10 @@ class QuarkDriveRepository @Inject constructor(
         }.filter { it.fid.isNotEmpty() }
     }
 
+    private companion object {
+        const val MULTI_URL_MAX = 4
+    }
+
     override suspend fun getDownloadUrl(fid: String): String {
         val body = try {
             api.getDownloadUrl(body = fidsBody.create(fid)).string()
@@ -78,6 +82,19 @@ class QuarkDriveRepository @Inject constructor(
             )
         }
         return url
+    }
+
+    override suspend fun getDownloadUrls(fid: String, count: Int): List<String> {
+        // 夸克 download API 每次调用返回不同 CDN 节点（dl-pc-zb-jN.
+        // drive.quark.cn 的 N 轮换）——逐次解析去重收集
+        val urls = linkedSetOf<String>()
+        repeat(count.coerceIn(1, MULTI_URL_MAX)) {
+            try {
+                urls.add(getDownloadUrl(fid))
+            } catch (_: Exception) {
+            }
+        }
+        return urls.toList()
     }
 
     /** HTTP 层错误映射（v5.1.0：401 = Cookie 过期引导重登）。 */
