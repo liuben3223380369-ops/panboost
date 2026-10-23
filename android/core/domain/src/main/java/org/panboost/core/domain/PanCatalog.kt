@@ -33,7 +33,7 @@ object PanCatalog {
         PanInfo(
             "uc", "UC网盘",
             "https://drive.uc.cn/", "https://drive.uc.cn/",
-            listOf("uc.cn"),
+            listOf("uc.cn", "pc-api.uc.cn"),
             listOf("__pus", "__puus"),
             listOf("drive.uc.cn/s/"),
         ),
@@ -61,7 +61,7 @@ object PanCatalog {
         PanInfo(
             "tianyi", "天翼云盘",
             "https://cloud.189.cn/web/", "https://cloud.189.cn/web/",
-            listOf("189.cn"),
+            listOf("189.cn", "api.cloud.189.cn"),
             listOf("COOKIE_LOGIN_USER"),
             listOf("cloud.189.cn/t/", "189.cn/t/"),
         ),
@@ -89,7 +89,7 @@ object PanCatalog {
         PanInfo(
             "lanzou", "蓝奏云",
             "https://www.lanzou.com/", "https://www.lanzou.com/u",
-            listOf("lanzou.com", "lanzoux.com"),
+            listOf("lanzou.com", "lanzoux.com", "woozooo.com"),
             emptyList(),
             listOf(
                 "lanzou.com/", "lanzoua.com/", "lanzoub.com/",
@@ -101,7 +101,7 @@ object PanCatalog {
                 "lanzour.com/", "lanzous.com/", "lanzout.com/",
                 "lanzouu.com/", "lanzouv.com/", "lanzouw.com/",
                 "lanzoux.com/", "lanzouy.com/", "lanzouz.com/",
-                "lanzn.com/",
+                "lanzn.com/", "woozooo.com/",
             ),
         ),
         PanInfo(

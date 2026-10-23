@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.PanBoost" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.PanBoost" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- v6.1.0：启动封面色（品牌深蓝——冷启动不再白屏闪断） -->
+        <item name="android:windowBackground">@drawable/launch_screen</item>
+    </style>
 </resources>

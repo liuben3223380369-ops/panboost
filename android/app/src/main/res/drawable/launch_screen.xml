@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v6.1.0：冷启动封面（纯色+居中 logo——与图标同源视觉） -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/launch_bg"/>
+    <item android:gravity="center">
+        <bitmap android:src="@drawable/ic_launcher_foreground"
+            android:gravity="center"/>
+    </item>
+</layer-list>
