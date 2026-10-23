@@ -79,7 +79,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         // 其余网盘用桌面浏览器 UA
         val dlUa = if (pan != null && pan.domains.any {
                 it == "quark.cn" || it == "uc.cn"
-            }) dlUa else DESKTOP_UA
+            }) QuarkApi.CLIENT_UA else DESKTOP_UA
         appLog.info(
             "download",
             "上下文：${pan?.key ?: "直链（无网盘）"} cookie=${dlCookie.length}字",
@@ -133,7 +133,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         // ---- auto 线程（v3.2.8 auto_tune：>64MB 实测） ----
         val threads = if (threadsChoice == AUTO_THREADS) {
             if (total > AUTO_TUNE_MIN_BYTES) {
-                val tuned = autoTune(client, url, referer, total)
+                val tuned = autoTune(client, url, referer, dlUa, total)
                 appLog.info("download", "auto 实测选定线程数: $tuned")
                 tuned
             } else {
@@ -374,11 +374,12 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         client: OkHttpClient,
         url: String,
         referer: String,
+        dlUa: String,
         total: Long,
     ): Int {
         return try {
-            val v1 = probeSpeed(client, url, referer, 1, 2_000, total)
-            val v16 = probeSpeed(client, url, referer, 16, 2_500, total)
+            val v1 = probeSpeed(client, url, referer, dlUa, 1, 2_000, total)
+            val v16 = probeSpeed(client, url, referer, dlUa, 16, 2_500, total)
             if (v1 <= 0 || v16 <= 0) {
                 DEFAULT_THREADS
             } else {
@@ -394,6 +395,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         client: OkHttpClient,
         url: String,
         referer: String,
+        dlUa: String,
         n: Int,
         ms: Long,
         total: Long,
