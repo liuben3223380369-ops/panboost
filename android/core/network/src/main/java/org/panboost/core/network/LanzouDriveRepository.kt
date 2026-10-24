@@ -203,16 +203,16 @@ class LanzouDriveRepository @Inject constructor(
             "https://pan.lanzoui.com" + iframeMatch.groupValues[1]
         }
         val dlPage = get(iframeUrl, headers)
-        val sign = Regex("'sign'\\s*:\\s*'([^']+)'").find(dlPage)?.groupValues?.get(1)
-            ?: Regex("data-sign=.([A-Za-z0-9]+).").find(dlPage)?.groupValues?.get(1]
-            ?: throw IllegalStateException("蓝奏云签名提取失败")
+        val sign = (Regex("'sign'\\s*:\\s*'([^']+)'").find(dlPage)?.groupValues?.get(1)
+            ?: Regex("data-sign=.([A-Za-z0-9]+).").find(dlPage)?.groupValues?.get(1))
+        val sign2 = sign ?: throw IllegalStateException("蓝奏云签名提取失败")
         val post = client.newCall(
             Request.Builder()
                 .url("https://pan.lanzoui.com/ajaxm.php")
                 .post(
                     FormBody.Builder()
                         .add("action", "downprocess")
-                        .add("sign", sign)
+                        .add("sign", sign2)
                         .add("kd", "1")
                         .add("ves", "1")
                         .build()
