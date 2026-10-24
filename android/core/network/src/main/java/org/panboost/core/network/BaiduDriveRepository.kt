@@ -58,7 +58,7 @@ class BaiduDriveRepository @Inject constructor(
         .header("X-Requested-With", "XMLHttpRequest")
         .apply { cookie().takeIf { it.isNotBlank() }?.let { header("Cookie", it) } }
 
-    private fun get(path: String, query: Map<String, String>): JSONObject =
+    private suspend fun get(path: String, query: Map<String, String>): JSONObject =
         JSONObject(doGet(path, query))
 
     private suspend fun doGet(path: String, query: Map<String, String>): String =
