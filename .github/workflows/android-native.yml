@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-7.1.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-7.2.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v7.1.0——蓝奏云主页面接入（Cookie 直连第四家全通）。' 'OpenList lanzou 驱动 Cookie 模式规格：列表走 pc.woozooo.com/doupload.php 表单 API（task=47 文件夹/task=5 文件分页，uid/vei 会话参数从 mydisk 页面提取并缓存）；直链走 task=22 取文件分享信息→分享页三步流（iframe→sign→ajaxm.php）解析。蓝奏登录 URL 同步改主页面域（Cookie 采集域对齐 doupload API 会话）。' '至此 Cookie 直连类网盘四家全通：夸克/UC/天翼/蓝奏——全部享有 1024 线程/多直链/断点续传/下载历史。OAuth 类（百度/123/阿里/迅雷）待 OAuth 授权流（架构性必需，ROADMAP 排期）。' '既有：29 用例门禁/反风控/全网盘 Cookie 泛化。' > "$NOTES_FILE"
-          TAG="android-v7.1.0"
+          printf '%s\n' 'PanBoost v7.2.0——百度网盘接入（Cookie 直连第五家全通）。' '突破性研究：OpenList baidu_netdisk 走 OAuth，但被忽略的 baidu_youth 驱动实证了网页版 youth API 的 Cookie 直连路线——列表 /youth/api/list（dir/page/num + app_id=250528 web=1）；会话参数 /api/gettemplatevariable 提取 bdstoken/uk/sk；直链 /youth/api/locatedownload 本地签名（rand=SHA1(uk+sk+time+0)、sign=MD5(md5_uk_fid_time)）——纯 Cookie 会话无需 OAuth token。BaiduDriveRepository 全规格落地（会话缓存+分页列表+签名直链）。' '至此 Cookie 直连五家全通：夸克/UC/天翼/蓝奏/百度——全部享有 1024 线程/多直链/断点续传。剩余 OAuth 类（123/阿里/迅雷——官方开放平台 token 架构性必需）。' > "$NOTES_FILE"
+          TAG="android-v7.2.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v7.1.0（蓝奏云接入·Cookie四家全通）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v7.2.0（百度接入·Cookie五家全通）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

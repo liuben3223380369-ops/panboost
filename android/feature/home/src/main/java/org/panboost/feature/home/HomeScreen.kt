@@ -146,7 +146,7 @@ internal fun HomeScreenContent(
             }
 
             // v6.6.0：未接浏览 API 的网盘显示接入预告（quark/uc 已通）
-            if (uiState.selectedPan !in setOf("quark", "uc", "tianyi", "lanzou")) {
+            if (uiState.selectedPan !in setOf("quark", "uc", "tianyi", "lanzou", "baidu")) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -177,7 +177,7 @@ internal fun HomeScreenContent(
             }
 
             // v5.1.1：空态/错误态持久 UI
-            if (uiState.showEmpty && uiState.selectedPan in setOf("quark", "uc", "tianyi", "lanzou")) {
+            if (uiState.showEmpty && uiState.selectedPan in setOf("quark", "uc", "tianyi", "lanzou", "baidu")) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -228,7 +228,7 @@ internal fun HomeScreenContent(
                 }
             }
 
-            if (uiState.selectedPan in setOf("quark", "uc", "tianyi", "lanzou")) LazyColumn(
+            if (uiState.selectedPan in setOf("quark", "uc", "tianyi", "lanzou", "baidu")) LazyColumn(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(uiState.files, key = { it.fid }) { file ->

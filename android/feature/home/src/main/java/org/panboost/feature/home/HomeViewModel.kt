@@ -34,6 +34,7 @@ class HomeViewModel @Inject constructor(
     private val ucDrive: org.panboost.core.network.UcDriveRepository,
     private val tianyiDrive: org.panboost.core.network.TianyiDriveRepository,
     private val lanzouDrive: org.panboost.core.network.LanzouDriveRepository,
+    private val baiduDrive: org.panboost.core.network.BaiduDriveRepository,
     private val downloadRepository: DownloadRepository,
     accountRepository: AccountRepository,
 ) : ViewModel() {
@@ -44,6 +45,7 @@ class HomeViewModel @Inject constructor(
             "uc" -> ucDrive
             "tianyi" -> tianyiDrive
             "lanzou" -> lanzouDrive
+            "baidu" -> baiduDrive
             else -> quarkDrive
         }
 
@@ -169,8 +171,8 @@ class HomeViewModel @Inject constructor(
     }
 
     private companion object {
-        /** v7.1.0：Cookie 直连四家全通（夸克/UC 同源+天翼+蓝奏主页面）。 */
-        val SUPPORTED_BROWSE = setOf("quark", "uc", "tianyi", "lanzou")
+        /** v7.2.0：Cookie 直连五家全通（+百度 youth API）。 */
+        val SUPPORTED_BROWSE = setOf("quark", "uc", "tianyi", "lanzou", "baidu")
     }
 
     private fun guessMime(name: String): String = when {
