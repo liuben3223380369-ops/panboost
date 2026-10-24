@@ -220,6 +220,9 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 "download",
                 "完成：$fileName（${fmt(speedTracker.rate())}/s，$threads 线程）",
             )
+            // v7.3.0：完成通知（点击跳 App——前台通知被取消后用户仍可
+            // 从通知回到 App 查看下载屏；P3#16）
+            notifyDone(fileName, total)
             return Result.success(
                 androidx.work.workDataOf(
                     MockDownloadWorker.KEY_BYTES to total,
@@ -618,6 +621,49 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         }
     }
 
+    // ---- 通知（v7.3.0：点按跳转 + 完成通知）----
+
+    /** 主界面跳转 PendingIntent（通知点按——Activity singleTop 复用）。 */
+    private fun mainPendingIntent(): android.app.PendingIntent? {
+        return try {
+            val intent = android.content.Intent(
+                appContext, org.panboost.MainActivity::class.java,
+            ).apply {
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            android.app.PendingIntent.getActivity(
+                appContext, 0, intent,
+                android.app.PendingIntent.FLAG_IMMUTABLE
+                    or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 完成通知（前台服务停止后仍可见；点按跳 App）。 */
+    private fun notifyDone(fileName: String, total: Long) {
+        try {
+            val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE)
+                as NotificationManager
+            val text = if (total > 0) {
+                "已完成 ${fmt(total)} —— 点击查看"
+            } else {
+                "下载完成 —— 点击查看"
+            }
+            val n = NotificationCompat.Builder(appContext, CHANNEL_ID)
+                .setContentTitle("✓ $fileName")
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setAutoCancel(true)
+                .setContentIntent(mainPendingIntent())
+                .build()
+            nm.notify(DONE_NOTIF_BASE + id.hashCode() % 1000, n)
+        } catch (_: Exception) {
+        }
+    }
+
     // ---- 前台通知 ----
 
     private fun createForegroundInfo(done: Long, total: Long): ForegroundInfo {
@@ -639,6 +685,8 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                // v7.3.0：点通知跳 App（ROADMAP P3#16）
+                .setContentIntent(mainPendingIntent())
                 .build()
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(
@@ -776,6 +824,7 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
                     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         private const val CHANNEL_ID = "panboost_download"
         private const val NOTIF_ID = 1001
+        private const val DONE_NOTIF_BASE = 2000
         private const val COPY_BUF = 100 * 1024
     }
 }

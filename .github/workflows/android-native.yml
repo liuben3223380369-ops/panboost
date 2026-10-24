@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-7.2.1-android.apk; done
+          for f in *.apk; do mv "$f" panboost-7.3.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v7.2.1——百度 Cookie 采集域强化。' '123 网盘研究结论：其全家族 API（个人网盘/分享/open）均要求 Bearer token（账密 sign_in 或官方 OAuth），Cookie 网页方案架构性不可行——分享链接下载（无需登录）已支持，个人网盘浏览排期 OAuth。本版强化百度 youth API 的 Cookie 采集：domains 补 pan.baidu.com/passport.baidu.com 显式域（登录页跳转域链完整覆盖），authKeys 补 STOKEN（BDUSS+STOKEN 为 pan.baidu.com 会话双要素）。' '既有：Cookie 直连五家全通（夸克/UC/天翼/蓝奏/百度）+ 1024 线程 + 多直链 + 29 用例门禁。' > "$NOTES_FILE"
-          TAG="android-v7.2.1"
+          printf '%s\n' 'PanBoost v7.3.0——通知跳转 + ROADMAP 收官。' '①下载通知全面升级（ROADMAP P3#16）：前台下载通知点按跳 App（PendingIntent + FLAG_SINGLE_TOP 复用单 Activity）；下载完成时发独立完成通知（标题 ✓ 文件名 + 大小 + 点击查看，autoCancel 点按即消）——后台下载完成无需打开 App 也可感知。' '②研究收官结论（ROADMAP 记入）：Cookie 直连五家全通（夸克/UC/天翼/蓝奏/百度）即该路线上限——阿里老驱动已废弃、迅雷浏览器模式为账密、123 全家族 Bearer token，三者 OAuth 为唯一剩余路径。' '既有：五网盘浏览下载/1024 线程/多直链/29 用例门禁/App 封面。' > "$NOTES_FILE"
+          TAG="android-v7.3.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v7.2.1（百度Cookie域强化）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v7.3.0（通知跳转+ROADMAP收官）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true

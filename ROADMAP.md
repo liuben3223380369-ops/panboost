@@ -52,7 +52,12 @@
 | # | 功能 | 现状 | 方案 | 状态 |
 |---|---|---|---|---|
 | 15 | 五屏导航（首页宫格/下载/账号/历史/日志） | ✅ 五 Tab + logs 路由 | M3 NavigationBar | ✅ v5.0.0 |
-| 16 | 下载完成通知点击跳转 | 前台通知无内容 Intent | PendingIntent → MainActivity 深链 download 屏 | 待做 |
+| 16 | 下载完成通知点击跳转 | ✅ | 前台/完成通知均挂 PendingIntent（FLAG_SINGLE_TOP 复用 MainActivity） | ✅ v7.3.0 |
+
+## Cookie 直连路线穷尽结论（v7.3.0 联网研究）
+
+- **已通五家**：夸克 / UC（clouddrive 同源）/ 天翼 / 蓝奏（doupload 表单）/ 百度（youth API + 本地签名）——Cookie 直连类网盘**全部接入完毕**
+- **路线穷尽**：阿里老驱动已废弃（refresh_token）；迅雷 thunder_browser 为账密登录；123 全家族 Bearer token——三者 OAuth 授权流为唯一路径（需各平台开发者凭证或网页授权码模式，个人分发受限）
 
 ## 官方通道研究（v6.1.1 联网结论）
 
