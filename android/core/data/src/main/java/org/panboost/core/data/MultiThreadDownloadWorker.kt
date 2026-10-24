@@ -629,13 +629,17 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
             val intent = android.content.Intent(
                 appContext, org.panboost.MainActivity::class.java,
             ).apply {
-                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                    or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = (
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                        or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    )
             }
             android.app.PendingIntent.getActivity(
                 appContext, 0, intent,
-                android.app.PendingIntent.FLAG_IMMUTABLE
-                    or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                (
+                    android.app.PendingIntent.FLAG_IMMUTABLE
+                        or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                    ),
             )
         } catch (_: Exception) {
             null
