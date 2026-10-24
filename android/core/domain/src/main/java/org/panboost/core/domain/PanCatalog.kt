@@ -40,8 +40,8 @@ object PanCatalog {
         PanInfo(
             "baidu", "百度网盘",
             "https://passport.baidu.com/v2/?login", "https://pan.baidu.com/disk/main",
-            listOf("baidu.com"),
-            listOf("BDUSS"),
+            listOf("baidu.com", "pan.baidu.com", "passport.baidu.com"),
+            listOf("BDUSS", "STOKEN"),
             listOf("pan.baidu.com/s/"),
         ),
         PanInfo(
