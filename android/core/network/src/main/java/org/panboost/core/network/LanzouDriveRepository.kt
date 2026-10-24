@@ -94,6 +94,7 @@ class LanzouDriveRepository @Inject constructor(
             .header("Referer", "https://pc.woozooo.com/mydisk.php")
             .apply { if (c.isNotBlank()) header("Cookie", c) }
             .post(builder.build())
+            .build()
         val body = client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IllegalStateException("蓝奏云 API HTTP ${resp.code}")
