@@ -623,17 +623,22 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
 
     // ---- 通知（v7.3.0：点按跳转 + 完成通知）----
 
-    /** 主界面跳转 PendingIntent（通知点按——Activity singleTop 复用）。 */
+    /**
+     * 主界面跳转 PendingIntent（通知点按）。
+     *
+     * v7.3.0：包管理器取启动 Intent（getLaunchIntentForPackage）——
+     * data 层无法引用 app 层 MainActivity（依赖方向：app→data），
+     * 包名启动 Intent 零类引用同效果（系统定位 launcher Activity）。
+     */
     private fun mainPendingIntent(): android.app.PendingIntent? {
         return try {
-            val intent = android.content.Intent(
-                appContext, org.panboost.MainActivity::class.java,
-            ).apply {
-                flags = (
-                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                        or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    )
-            }
+            val intent = appContext.packageManager
+                .getLaunchIntentForPackage(appContext.packageName)
+                ?: return null
+            intent.flags = (
+                android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
             android.app.PendingIntent.getActivity(
                 appContext, 0, intent,
                 (
