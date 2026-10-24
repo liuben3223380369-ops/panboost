@@ -26,7 +26,7 @@
 | 2 | **剪贴板识别**：复制分享链接回 App 自动填入 | ✅ | 进分享屏 LaunchedEffect 检测（不覆盖已输入） | ✅ v4.2.0 |
 | 3 | **URL 直链高级下载**：粘贴任意直链 | ✅ 基础（8 线程分块） | UA 回退/挑战 Cookie 后续 | 🟡 v5.0.0 |
 | 4 | **网盘多账号管理**：账号页账簿（已登录徽标/删除/重新登录） | ✅ | :feature:accounts（18 网盘宫格/徽标/删除）+ MultiPanCookieStore | ✅ v4.3.0 |
-| 5 | **多网盘支持**（v3.2.8 = 18 家） | 🟡 清单/登录/粘贴全通；**浏览下载：夸克 + UC + 天翼**（v7.0.0） | **OAuth 类网盘（Cookie 不可直连）**：百度/123/阿里/迅雷——官方 API 要求 access_token（百度 openapi/oauth、123 login.123pan 账密换 token、阿里 open-api 平台申请），WebView Cookie 方案在此类网盘上**架构性不可行**，需接 OAuth 授权流（后续版本）；其余（微云 SDK 重/OneDrive·Dropbox·GDrive·MEGA·Yandex 境外 OAuth）按用户需求排期 | 进行中 |
+| 5 | **多网盘支持**（v3.2.8 = 18 家） | 🟡 清单/登录/粘贴全通；**浏览下载：夸克 + UC + 天翼 + 蓝奏**（v7.1.0，Cookie 直连四家全通） | **OAuth 类网盘（Cookie 不可直连）**：百度/123/阿里/迅雷——官方 API 要求 access_token（百度 openapi/oauth、123 login.123pan 账密换 token、阿里 open-api 平台申请），WebView Cookie 方案在此类网盘上**架构性不可行**，需接 OAuth 授权流（后续版本）；其余（微云 SDK 重/OneDrive·Dropbox·GDrive·MEGA·Yandex 境外 OAuth）按用户需求排期 | 进行中 |
 | 6 | **手动粘贴 Cookie 路径**（WebView 登录失败时的兜底） | ✅ | 账号页粘贴对话框（保存即验证徽标） | ✅ v4.3.0 |
 
 ### P1 —— 可靠性与可观测性

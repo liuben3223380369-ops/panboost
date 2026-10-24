@@ -88,7 +88,9 @@ object PanCatalog {
         ),
         PanInfo(
             "lanzou", "蓝奏云",
-            "https://www.lanzou.com/", "https://www.lanzou.com/u",
+            // v7.1.0：登录 URL 改主页面（pc.woozooo.com——doupload API 的
+            // Cookie 会话域；OpenList BaseUrl 实证)
+            "https://pc.woozooo.com/", "https://pc.woozooo.com/",
             listOf("lanzou.com", "lanzoux.com", "woozooo.com"),
             emptyList(),
             listOf(

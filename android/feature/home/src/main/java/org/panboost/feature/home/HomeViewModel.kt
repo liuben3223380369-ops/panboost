@@ -33,6 +33,7 @@ class HomeViewModel @Inject constructor(
     private val quarkDrive: org.panboost.core.network.QuarkDriveRepository,
     private val ucDrive: org.panboost.core.network.UcDriveRepository,
     private val tianyiDrive: org.panboost.core.network.TianyiDriveRepository,
+    private val lanzouDrive: org.panboost.core.network.LanzouDriveRepository,
     private val downloadRepository: DownloadRepository,
     accountRepository: AccountRepository,
 ) : ViewModel() {
@@ -42,6 +43,7 @@ class HomeViewModel @Inject constructor(
         get() = when (selectedPan.value) {
             "uc" -> ucDrive
             "tianyi" -> tianyiDrive
+            "lanzou" -> lanzouDrive
             else -> quarkDrive
         }
 
@@ -167,8 +169,8 @@ class HomeViewModel @Inject constructor(
     }
 
     private companion object {
-        /** v7.0.0：已接浏览 API 的网盘（夸克/UC 同源家族+天翼 Cookie 直连）。 */
-        val SUPPORTED_BROWSE = setOf("quark", "uc", "tianyi")
+        /** v7.1.0：Cookie 直连四家全通（夸克/UC 同源+天翼+蓝奏主页面）。 */
+        val SUPPORTED_BROWSE = setOf("quark", "uc", "tianyi", "lanzou")
     }
 
     private fun guessMime(name: String): String = when {
