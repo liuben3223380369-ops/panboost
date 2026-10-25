@@ -57,7 +57,7 @@ jobs:
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          for f in *.apk; do mv "$f" panboost-7.3.0-android.apk; done
+          for f in *.apk; do mv "$f" panboost-7.4.0-android.apk; done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -70,12 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NOTES_FILE: release-notes.txt
         run: |
-          printf '%s\n' 'PanBoost v7.3.0——通知跳转 + ROADMAP 收官。' '①下载通知全面升级（ROADMAP P3#16）：前台下载通知点按跳 App（PendingIntent + FLAG_SINGLE_TOP 复用单 Activity）；下载完成时发独立完成通知（标题 ✓ 文件名 + 大小 + 点击查看，autoCancel 点按即消）——后台下载完成无需打开 App 也可感知。' '②研究收官结论（ROADMAP 记入）：Cookie 直连五家全通（夸克/UC/天翼/蓝奏/百度）即该路线上限——阿里老驱动已废弃、迅雷浏览器模式为账密、123 全家族 Bearer token，三者 OAuth 为唯一剩余路径。' '既有：五网盘浏览下载/1024 线程/多直链/29 用例门禁/App 封面。' > "$NOTES_FILE"
-          TAG="android-v7.3.0"
+          printf '%s\n' 'PanBoost v7.4.0——auto 线程档实测调优。' '①修复 autoTune 探针数学缺陷（ROADMAP P2#11）：旧探针 ratio=v16/v1 恒≤16（物理上限）致 coerceIn(16,512) 永远命中下限——探针形同虚设，auto 档 >64MB 实际永远跑 16 线程。v7.4.0 改阶梯探测 1/8/64/512 并发吞吐，找增益比 <1.5 的饱和拐点选拐点档位。' '②三档分档：≤4MB→8 线程（小文件不浪费）；≤64MB→32 线程（经验中档）；>64MB→阶梯探针（在线自适应）。探针数据写入 AppLog 便于真机验证。' '既有：五网盘浏览下载/1024 线程/多直链/29 用例门禁/App 封面/通知跳转。' > "$NOTES_FILE"
+          TAG="android-v7.4.0"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" android/app/build/outputs/apk/release/*.apk --clobber -R "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v7.3.0（通知跳转+ROADMAP收官）" --latest --notes-file "$NOTES_FILE"
+            gh release create "$TAG" android/app/build/outputs/apk/release/*.apk -R "$GITHUB_REPOSITORY" --title "PanBoost Android v7.4.0（auto线程档实测调优）" --latest --notes-file "$NOTES_FILE"
           fi
           # 删除已知的 v4.1.0 残废资产（防误装闪退）
           gh release delete-asset android-v4.1.0 panboost-4.1.0-android.apk -y -R "$GITHUB_REPOSITORY" --repo "$GITHUB_REPOSITORY" || true
