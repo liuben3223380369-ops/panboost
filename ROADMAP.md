@@ -54,6 +54,23 @@
 | 15 | 五屏导航（首页宫格/下载/账号/历史/日志） | ✅ 五 Tab + logs 路由 | M3 NavigationBar | ✅ v5.0.0 |
 | 16 | 下载完成通知点击跳转 | ✅ | 前台/完成通知均挂 PendingIntent（FLAG_SINGLE_TOP 复用 MainActivity） | ✅ v7.3.0 |
 
+## 网盘根目录 id 修复（v7.4.1）
+
+**用户反馈**：百度网盘无法查看内容。
+
+**根因分析**（三家网盘根目录 id 问题）：
+- **百度**：list API 的 `dir` 参数需**路径**（`/`），Home 传 `"0"` 表根目录致 `dir=0` 百度不认；
+  且 `DriveFile.fid` 误用 `fs_id`（应为 `path`）——子目录浏览时 openDir 传 fs_id 给 dir 参数，百度
+  API 不认路径。`getDownloadUrl` 的 locatedownload 签名也需 fs_id（从 filemetas 响应取）
+- **天翼**：根目录 `folderId=-1`，传 `0` 返回空列表
+- **蓝奏**：根目录 `folder_id=-1`，传 `0` 返回空列表
+- 夸克/UC：根目录 `fid=0` 正确（夸克 API 规格）
+
+**v7.4.1 修复**：
+- 百度：`dir "0"→"/"`、`DriveFile.fid` 改存 `path`、`getDownloadUrl` 从 filemetas 取 `fs_id` 签名
+- 天翼：`folderId "0"→"-1"`
+- 蓝奏：`folder_id "0"→"-1"`（task=47 文件夹 + task=5 文件分页）
+
 ## auto 线程档调优结论（v7.4.0）
 
 **旧探针数学缺陷**：v3.2.8 autoTune 用 ratio=v16/v1（16 连接合计 / 单连接），

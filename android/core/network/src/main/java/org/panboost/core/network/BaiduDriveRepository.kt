@@ -103,15 +103,16 @@ class BaiduDriveRepository @Inject constructor(
             if (cookie().isBlank()) {
                 throw IllegalStateException("百度网盘未登录——请到「账号」页登录百度")
             }
-            // pdirFid 为路径（百度 list 用 dir 路径参数——Home 面包屑传 fid，
-            // 百度场景传路径字符串）
+            // v7.4.1：百度 list 用 dir 路径参数——Home 传 "0" 表根目录，
+            // 百度根目录路径是 "/"；子目录 fid 存的是 path（见下）
+            val dir = if (pdirFid == "0") "/" else pdirFid
             val out = ArrayList<DriveFile>()
             var page = 1
             while (true) {
                 val root = get(
                     "/youth/api/list",
                     mapOf(
-                        "dir" to pdirFid,
+                        "dir" to dir,
                         "page" to page.toString(),
                         "num" to "1000",
                         "order" to "name",
@@ -128,7 +129,9 @@ class BaiduDriveRepository @Inject constructor(
                     list.optJSONObject(i)?.let { o ->
                         out.add(
                             DriveFile(
-                                fid = o.optLong("fs_id").toString(),
+                                // v7.4.1：fid 存 path（百度 dir 参数用路径，
+                                // 子目录浏览传 path；下载时 filemetas 接受 path）
+                                fid = o.optString("path"),
                                 name = o.optString("server_filename"),
                                 size = o.optLong("size"),
                                 isDir = o.optInt("isdir") == 1,
@@ -154,14 +157,16 @@ class BaiduDriveRepository @Inject constructor(
             val info = root.optJSONArray("info")?.optJSONObject(0)
             val path = info?.optString("path").orEmpty()
             val md5 = info?.optString("md5").orEmpty()
-            if (path.isEmpty() || md5.isEmpty()) {
+            val fsId = info?.optLong("fs_id", 0L) ?: 0L
+            if (path.isEmpty() || md5.isEmpty() || fsId == 0L) {
                 appLog.error("drive", "[baidu] filemetas 响应：${root.toString().take(200)}")
                 throw IllegalStateException("百度文件元数据获取失败——详见日志")
             }
             // locatedownload 签名（youth 规格：本地 SHA1/MD5）
+            // v7.4.1：签名用 filemetas 返回的 fs_id（fid 现在是 path）
             val now = System.currentTimeMillis().toString()
             val rand = sha1Hex("$uk$sk${now}0")
-            val sign = md5Hex("${md5}_${uk}_${fid}_$now")
+            val sign = md5Hex("${md5}_${uk}_${fsId}_$now")
             val dl = get(
                 "/youth/api/locatedownload",
                 mapOf(

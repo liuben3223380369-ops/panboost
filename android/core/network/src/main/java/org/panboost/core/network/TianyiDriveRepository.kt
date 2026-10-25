@@ -29,11 +29,13 @@ class TianyiDriveRepository @Inject constructor(
 ) : DriveRepository {
 
     override suspend fun listFiles(pdirFid: String): List<DriveFile> {
+        // v7.4.1：天翼根目录 folderId=-1（Home 传 "0" 表根目录）
+        val folderId = if (pdirFid == "0") "-1" else pdirFid
         val out = ArrayList<DriveFile>()
         var pageNum = 1
         while (true) {
             val body = try {
-                api.listFiles(folderId = pdirFid, pageNum = pageNum).string()
+                api.listFiles(folderId = folderId, pageNum = pageNum).string()
             } catch (e: retrofit2.HttpException) {
                 throw IllegalStateException(mapHttpError(e))
             }

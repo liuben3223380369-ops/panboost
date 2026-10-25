@@ -114,10 +114,12 @@ class LanzouDriveRepository @Inject constructor(
     override suspend fun listFiles(pdirFid: String): List<DriveFile> =
         withContext(Dispatchers.IO) {
             val (uid, vei) = session()
+            // v7.4.1：蓝奏根目录 folder_id=-1（Home 传 "0" 表根目录）
+            val folderId = if (pdirFid == "0") "-1" else pdirFid
             val out = ArrayList<DriveFile>()
             // task=47：文件夹
             runCatching {
-                douploadBlocking(uid, vei, mapOf("task" to "47", "folder_id" to pdirFid))
+                douploadBlocking(uid, vei, mapOf("task" to "47", "folder_id" to folderId))
             }.getOrNull()?.let { arr ->
                 for (i in 0 until arr.length()) {
                     arr.optJSONObject(i)?.let { o ->
@@ -142,7 +144,7 @@ class LanzouDriveRepository @Inject constructor(
                 val arr = runCatching {
                     douploadBlocking(
                         uid, vei,
-                        mapOf("task" to "5", "folder_id" to pdirFid, "pg" to pg.toString()),
+                        mapOf("task" to "5", "folder_id" to folderId, "pg" to pg.toString()),
                     )
                 }.getOrNull() ?: break
                 if (arr.length() == 0) break
