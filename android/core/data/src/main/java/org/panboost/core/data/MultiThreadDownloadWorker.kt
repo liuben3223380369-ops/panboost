@@ -138,14 +138,18 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         }
         val total = probe.total
 
-        // ---- auto 线程（v3.2.8 auto_tune：>64MB 实测） ----
+        // ---- auto 线程（v7.4.0：三档分档 + 阶梯探针） ----
+        // ≤4MB→8（小文件开多了浪费）；≤64MB→32（经验中档）；
+        // >64MB→阶梯探针（1/8/64/512 找吞吐拐点，在线自适应）
         val threads = if (threadsChoice == AUTO_THREADS) {
-            if (total > AUTO_TUNE_MIN_BYTES) {
-                val tuned = autoTune(client, url, referer, dlUa, total)
-                appLog.info("download", "auto 实测选定线程数: $tuned")
-                tuned
-            } else {
-                SMALL_FILE_THREADS
+            when {
+                total <= AUTO_SMALL_FILE_BYTES -> AUTO_TINY_THREADS
+                total <= AUTO_TUNE_MIN_BYTES -> AUTO_MID_THREADS
+                else -> {
+                    val tuned = autoTune(client, url, referer, dlUa, total)
+                    appLog.info("download", "auto 实测选定线程数: $tuned")
+                    tuned
+                }
             }
         } else {
             threadsChoice.coerceIn(1, MAX_THREADS)
@@ -431,7 +435,13 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         )
     }
 
-    /** auto 线程探针（v3.2.8 auto_tune：单连接 vs 16 并发吞吐比）。 */
+    /**
+     * auto 线程探针（v7.4.0：阶梯探测找吞吐拐点）。
+     *
+     * v3.2.8 旧探针 ratio=v16/v1 恒 ≤16（物理上限），coerceIn(16,512)
+     * 永远命中下限——探针形同虚设。v7.4.0 改阶梯：测 1/8/64/512
+     * 并发吞吐，找增益比 <1.5（饱和拐点）的档位，选该档为线程数。
+     */
     private fun autoTune(
         client: OkHttpClient,
         url: String,
@@ -440,13 +450,29 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         total: Long,
     ): Int {
         return try {
-            val v1 = probeSpeed(client, url, referer, dlUa, 1, 2_000, total)
-            val v16 = probeSpeed(client, url, referer, dlUa, 16, 2_500, total)
-            if (v1 <= 0 || v16 <= 0) {
-                DEFAULT_THREADS
-            } else {
-                (v16 / v1).toInt().coerceIn(SMALL_FILE_THREADS, AUTO_MAX_THREADS)
+            val ms = 2_000L
+            val v1 = probeSpeed(client, url, referer, dlUa, 1, ms, total)
+            val v8 = probeSpeed(client, url, referer, dlUa, 8, ms, total)
+            val v64 = probeSpeed(client, url, referer, dlUa, 64, ms, total)
+            val v512 = probeSpeed(client, url, referer, dlUa, 512, ms, total)
+            appLog.info(
+                "download",
+                "auto 探针：v1=${v1 / 1024}KB/s v8=${v8 / 1024}KB/s " +
+                    "v64=${v64 / 1024}KB/s v512=${v512 / 1024}KB/s",
+            )
+            if (v1 <= 0) return DEFAULT_THREADS
+            val steps = listOf(8 to v8, 64 to v64, 512 to v512)
+            var chosen = 8
+            var prevBps = v1
+            for ((n, bps) in steps) {
+                if (bps <= 0) break
+                val gain = bps.toDouble() / prevBps
+                appLog.info("download", "auto 探针：$n 并发增益 x${"%.2f".format(gain)}")
+                if (gain < AUTO_TUNE_GAIN_THRESHOLD) break
+                chosen = n
+                prevBps = bps
             }
+            chosen.coerceIn(SMALL_FILE_THREADS, MAX_THREADS)
         } catch (_: Exception) {
             DEFAULT_THREADS
         }
@@ -806,6 +832,11 @@ class MultiThreadDownloadWorker @AssistedInject constructor(
         // v6.0.0：对齐 OpenList PartSize=10MB
         const val MAX_PIECE = 64L * 1024 * 1024
         const val AUTO_TUNE_MIN_BYTES = 64L * 1024 * 1024
+        // v7.4.0：auto 三档分档阈值与线程数
+        const val AUTO_SMALL_FILE_BYTES = 4L * 1024 * 1024
+        const val AUTO_TINY_THREADS = 8
+        const val AUTO_MID_THREADS = 32
+        const val AUTO_TUNE_GAIN_THRESHOLD = 1.5
 
         // v5.4.2：可退避错误码（412 预条件/403 风控/429 限流）
         val RETRYABLE_CODES = setOf(412, 403, 429)
